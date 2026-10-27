@@ -3,7 +3,9 @@
 Round 0 is the first assembly (rule getorganelle_mt). If it is not circular, each further round uses the previous
 round's result as the seed (-s), a higher -R and all clean reads; when the clean data exceed `max_gb` Gb only that
 much is used (converted to GetOrganelle --max-reads with the mean read length from fastp). Stops at the first
-circular round. The final mitogenome is the first circular round, otherwise the last round that gave a result.
+circular round, and when a round returns the same sequence as the round before: more rounds cannot help then
+(MJ20260820041: CHY007, HN_Pisione_1/2, WenSC001 changed by 0-74 bp after round 1 and never again; ~6 h of identical
+rounds). The result is the first circular round, otherwise the last round that gave a result.
 """
 import json
 import subprocess
@@ -34,8 +36,13 @@ def max_reads():
 rounds = [("round0", *best(base / "round0"))]
 log.write(f"round0: {len(rounds[0][1])} sequence(s), circular={rounds[0][2]}\n")
 cap = max_reads()
+stop = "circular" if rounds[0][2] else "rounds exhausted"
 for k in range(1, int(p.rounds) + 1):
     if any(c for _, _, c in rounds):
+        stop = "circular"
+        break
+    if k >= 2 and rounds[-1][1] and sorted(s for _, s in rounds[-1][1]) == sorted(s for _, s in rounds[-2][1]):
+        stop = f"no change after {rounds[-1][0]}"
         break
     prev = next((r for _, r, _ in reversed(rounds) if r), None)
     out = base / f"round{k}"
@@ -61,5 +68,5 @@ with open(sm.output.fasta, "w") as fh:
     write_fasta(renamed(recs, sample, "mt"), fh)
 json.dump({"sample": sample, "circular": circ, "round": name, "rounds_run": len(rounds) - 1,
            "n_sequences": len(recs), "length": sum(len(s) for _, s in recs),
-           "max_reads_per_file": cap}, open(sm.output.status, "w"), indent=1)
-log.write(f"final: {name} circular={circ}\n")
+           "max_reads_per_file": cap, "stop": stop}, open(sm.output.status, "w"), indent=1)
+log.write(f"final: {name} circular={circ} ({stop})\n")

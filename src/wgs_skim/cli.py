@@ -3,6 +3,7 @@
     wgs_skim run -r /path/to/rawdata                  # everything automatic (annelid preset)
     wgs_skim run -r rawdata -o results --taxon fish -j 64
     wgs_skim run -r rawdata -n                        # dry run: show what would run
+    wgs_skim run -r rawdata --steps fastp,spades,busco   # only some steps (plus what they need)
     wgs_skim install                                  # create all software environments once
     wgs_skim samples -r rawdata                       # show detected sample names
     wgs_skim config > my.yaml                         # all options with comments
@@ -65,7 +66,8 @@ def cmd_run(args, passthrough):
     out.mkdir(parents=True, exist_ok=True)
     conf = {"reads_dir": reads, "samples": Path(args.samples).resolve() if args.samples else None,
             "outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "blast_db": args.blast_db, "email": args.email,
-            "busco_lineage": args.busco_lineage}
+            "busco_lineage": args.busco_lineage, "steps": args.steps,
+            "blast_mt": args.blast_mt, "blast_nr": args.blast_nr}
     cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
     if args.dry_run:
         cmd.append("-n")
@@ -125,7 +127,15 @@ def main(argv=None):
     r.add_argument("-t", "--taxon", choices=TAXA, help="taxon preset (default annelid)")
     r.add_argument("-j", "--cores", type=int, default=os.cpu_count(), help="CPU cores to use")
     r.add_argument("-n", "--dry-run", action="store_true", help="only show what would be run")
+    r.add_argument("--steps", metavar="STEP[,STEP]",
+                   help="run only these steps (and what they need): fastp, meangs, mito (MEANGS + GetOrganelle), "
+                        "getorganelle (without MEANGS), nr, spades, busco, genome_size, annotate, topology, blast, "
+                        "summary (default: everything)")
     r.add_argument("--blast-db", help="local nt database prefix (default: NCBI online BLAST)")
+    r.add_argument("--blast-mt", metavar="Q[,Q]",
+                   help="mitogenome BLAST queries: full and/or genes, e.g. cox1,16s,cytb (default cox1)")
+    r.add_argument("--blast-nr", metavar="Q[,Q]",
+                   help="rDNA BLAST queries: full and/or 18S, ITS, ITS1, 5.8S, ITS2, 28S (default 18S,ITS,28S)")
     r.add_argument("--email", help="e-mail for NCBI Entrez (BLAST metadata)")
     r.add_argument("--busco-lineage", help="BUSCO lineage name or downloaded lineage directory")
     common(r)

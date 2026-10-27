@@ -39,7 +39,7 @@ rule meangs:
         meangs.py --silence -1 $r1 -2 $r2 -o meangs -t {threads} -i {params.insert_size} \
             --species_class {params.cls} -n {params.n} --deepin > $log 2>&1 \
             || echo "[wgs_skim] MEANGS failed (rc=$?): GetOrganelle will use its own animal_mt seeds" >> $log
-        seed=$(find meangs -name 'scaffold_seeds.fa*' | head -n 1)
+        seed=$(find . -name 'scaffold_seeds.fa*' | head -n 1)
         if [ -n "$seed" ] && [ -s "$seed" ]; then cp "$seed" {wildcards.sample}.seed.fasta; else : > {wildcards.sample}.seed.fasta; fi
         rm -rf meangs
         """
@@ -50,7 +50,7 @@ rule getorganelle_mt:
     input:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
-        seed=rules.meangs.output.seed,
+        seed=mt_seed,
         db=GETORG_DB,
     output:
         done=f"{OUT}/mito/{{sample}}/round0/.done",
@@ -84,8 +84,8 @@ rule mt_iterate:
         round0=rules.getorganelle_mt.output.done,
         db=GETORG_DB,
     output:
-        fasta=f"{OUT}/mito/{{sample}}/{{sample}}.mt.fasta",
-        status=f"{OUT}/mito/{{sample}}/{{sample}}.mt.json",
+        fasta=f"{OUT}/mito/{{sample}}/{{sample}}.getorganelle.fasta",
+        status=f"{OUT}/mito/{{sample}}/{{sample}}.getorganelle.json",
     params:
         rounds=config["mt_iter_rounds"],
         R=config["mt_iter_R"],
@@ -100,6 +100,22 @@ rule mt_iterate:
         "../envs/getorganelle.yaml"
     script:
         "../scripts/mt_iterate.py"
+
+
+rule mt_select:
+    """Final mitogenome: GetOrganelle, or the SPAdes scaffold when it closes the circle / is longer (see script)."""
+    input:
+        unpack(mt_select_inputs),
+    output:
+        fasta=f"{OUT}/mito/{{sample}}/{{sample}}.mt.fasta",
+        status=f"{OUT}/mito/{{sample}}/{{sample}}.mt.json",
+    log:
+        f"{OUT}/logs/mt_select/{{sample}}.log",
+    threads: 8
+    conda:
+        "../envs/blast.yaml"
+    script:
+        "../scripts/mt_select.py"
 
 
 rule getorganelle_nr:

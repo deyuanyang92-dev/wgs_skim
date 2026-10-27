@@ -12,12 +12,15 @@ properties:
     type: string
     enum: ["", A-worms, Arthropoda, Bryozoa, Chordata, Echinodermata, Mollusca, Nematoda, N-worms, Porifera-sponges]
     default: ""
-  mitoz_clade:
+  clade:
     type: string
     enum: ["", Chordata, Arthropoda, Echinodermata, Annelida-segmented-worms, Bryozoa, Mollusca, Nematoda,
-           Nemertea-ribbon-worms, Porifera-sponges]
+           Nemertea-ribbon-worms, Porifera-sponges, Animal]
     default: ""
+  mitos_refdir: {type: string, default: "", description: "existing MITOS2 reference directory containing refseq89m"}
   busco_lineage: {type: string, default: ""}
+  steps: {type: string, default: "", description: "run only these steps (comma separated); empty = all switched on"}
+  meangs: {type: boolean, default: true}
   mito: {type: boolean, default: true}
   nr: {type: boolean, default: true}
   assembly: {type: boolean, default: true}
@@ -31,15 +34,22 @@ properties:
   insert_size: {type: integer, minimum: 1, default: 350}
   mt_iter_rounds: {type: integer, minimum: 0, default: 3}
   mt_iter_R: {type: integer, minimum: 1, default: 20}
+  mt_from_spades: {type: boolean, default: true}
   mt_iter_max_data_gb: {type: number, minimum: 0, default: 20}
   nr_seed: {type: string, default: ""}
   nr_label: {type: string, default: ""}
   spades_min_clean_gb: {type: number, minimum: 0, default: 0}
   spades_gib_per_gb: {type: number, minimum: 0, default: 6.5}
   spades_min_mem_gb: {type: number, minimum: 1, default: 32}
+  topology_pairs: {type: integer, minimum: 0, default: 10000000}
   kmer_size: {type: integer, minimum: 11, default: 21}
   ploidy: {type: integer, minimum: 1, default: 2}
   blast_db: {type: string, default: ""}
+  blast_mt: {type: string, default: "cox1", description: "full and/or mitochondrial genes, comma separated"}
+  blast_nr: {type: string, default: "18S,ITS,28S", description: "full and/or 18S ITS ITS1 5.8S ITS2 28S"}
+  mitom_commit: {type: string, default: "27264d2cf672c718deff6915317a7ee01852830b"}
+  mitom_nuc_commit: {type: string, default: "4e9b99eb2160e098e4469d940b61f91cbb2b59ba"}
+  mitom_dir: {type: string, default: "", description: "use this MitoM checkout instead of the pinned commits"}
   blast_topn: {type: integer, minimum: 1, default: 5}
   email: {type: string, default: ""}
 anyOf:

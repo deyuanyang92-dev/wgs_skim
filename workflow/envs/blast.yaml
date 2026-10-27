@@ -6,6 +6,3 @@ dependencies:
   - python =3.11
   - blast =2.16.0
   - biopython =1.84
-  - pip
-  - pip:
-      - "blast2metadata @ git+https://github.com/deyuanyang92-dev/Temp_scripts.git#subdirectory=blast2metadata"

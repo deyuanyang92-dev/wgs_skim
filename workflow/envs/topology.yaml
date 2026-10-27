@@ -6,4 +6,3 @@ dependencies:
   - python =3.12
   - bwa =0.7.18
   - samtools =1.21
-  - blast =2.16.0

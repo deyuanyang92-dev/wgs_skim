@@ -11,20 +11,31 @@ db_dir: ""             # where GetOrganelle / BUSCO databases are downloaded onc
 
 # ── Taxon preset ──────────────────────────────────────────────────────────────
 # annelid (default) | mollusc | fish | crustacean — sets MEANGS class, mitochondrial genetic code,
-# MitoZ clade and BUSCO lineage. Each can be overridden by the keys below (leave empty to use the preset);
+# MitoM clade and BUSCO lineage. Each can be overridden by the keys below (leave empty to use the preset);
 # for other animals keep any preset and set all four keys.
 taxon: annelid
 genetic_code: ""       # NCBI mitochondrial code (5 invertebrate, 2 vertebrate)
 meangs_class: ""       # A-worms Arthropoda Bryozoa Chordata Echinodermata Mollusca Nematoda N-worms Porifera-sponges
-mitoz_clade: ""        # Chordata Arthropoda Echinodermata Annelida-segmented-worms Bryozoa Mollusca Nematoda Nemertea-ribbon-worms Porifera-sponges
+clade: ""              # MitoM protein set: Chordata Arthropoda Echinodermata Annelida-segmented-worms Bryozoa Mollusca Nematoda
+                       #   Nemertea-ribbon-worms Porifera-sponges Animal (all animals: other phyla)
+mitos_refdir: ""       # existing MITOS2 reference directory (contains refseq89m); empty = downloaded once
+mitom_dir: ""          # your own MitoM checkout (e.g. ~/mybiosofts/Mitom) instead of the pinned versions below
+mitom_commit: "27264d2cf672c718deff6915317a7ee01852830b"      # MitoM version for mitogenome annotation
+mitom_nuc_commit: "4e9b99eb2160e098e4469d940b61f91cbb2b59ba"  # MitoM version with `mitom nuc` (rDNA annotation)
 busco_lineage: ""      # lineage name (downloaded once, e.g. metazoa_odb12) or path to a downloaded lineage directory
 
-# ── Steps (true / false) ──────────────────────────────────────────────────────
+# ── Steps ─────────────────────────────────────────────────────────────────────
+# steps: run only some parts, comma separated; upstream steps they need run too (spades needs fastp ...).
+#   fastp | meangs | mito (MEANGS -> GetOrganelle -> reseeded rounds) | getorganelle (no MEANGS seed) | nr |
+#   spades | busco | genome_size | annotate | topology | blast | summary
+#   e.g. steps: "fastp,spades,busco"     empty = everything switched on below
+steps: ""
+meangs: true           # MEANGS seed for GetOrganelle (false: GetOrganelle's own animal_mt seeds)
 mito: true             # MEANGS seed -> GetOrganelle mitogenome (+ reseeded iterations if not circular)
 nr: true               # GetOrganelle nuclear rDNA (18S-ITS-28S)
 assembly: true         # SPAdes whole-genome assembly + BUSCO
 genome_size: true      # jellyfish + GenomeScope2
-annotate: true         # MitoZ annotation of the final mitogenome
+annotate: true         # MitoM annotation of the final mitogenome
 topology: true         # read-based check that circular / linear mitogenomes are real (junction-spanning reads)
 blast: true            # BLAST mitogenome and rDNA, top hits with GenBank taxonomy (species check)
 
@@ -36,6 +47,8 @@ insert_size: 350
 mt_iter_rounds: 3                # reseeded GetOrganelle rounds when the first assembly is not circular
 mt_iter_R: 20                    # GetOrganelle -R in reseeded rounds
 mt_iter_max_data_gb: 20          # reseeded rounds use all clean reads up to this many Gb (0 = no limit)
+mt_from_spades: true             # use the SPAdes scaffold when it closes the circle / is longer than GetOrganelle
+topology_pairs: 10000000         # read pairs used for the circular / linear check (0 = all)
 
 # ── 18S-28S rDNA ──────────────────────────────────────────────────────────────
 nr_seed: ""            # seed FASTA; empty = bundled resources/rdna (polychaete 18S/5.8S/28S, works across animals)
@@ -52,6 +65,9 @@ ploidy: 2
 
 # ── BLAST ─────────────────────────────────────────────────────────────────────
 blast_db: ""           # local nt database prefix (fast); empty = NCBI online BLAST (slow, no download)
+blast_mt: "cox1"       # mitogenome queries, comma separated: full (whole sequence) and/or genes from the MitoM
+                       #   annotation: cox1 (COI) cox2 cox3 cytb nad1-6 nad4l atp6 atp8 16s (rrnL) 12s (rrnS)
+blast_nr: "18S,ITS,28S" # rDNA queries: full and/or 18S ITS (ITS1-5.8S-ITS2) ITS1 5.8S ITS2 28S (mitom nuc annotation)
 blast_topn: 5
 email: ""              # required by NCBI Entrez for GenBank metadata, e.g. you@example.com
 

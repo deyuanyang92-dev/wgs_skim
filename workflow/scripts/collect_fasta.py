@@ -6,20 +6,8 @@ orientation of flip-flop regions); the first one is used. Circular sequences hav
 import sys
 from pathlib import Path
 
-
-def read_fasta(path):
-    recs, name, seq = [], None, []
-    for line in open(path):
-        line = line.strip()
-        if line.startswith(">"):
-            if name is not None:
-                recs.append((name, "".join(seq)))
-            name, seq = line[1:], []
-        elif line:
-            seq.append(line)
-    if name is not None:
-        recs.append((name, "".join(seq)))
-    return recs
+sys.path.insert(0, str(Path(__file__).parent))
+from seqtools import read_fasta, write_fasta  # noqa: E402,F401
 
 
 def result_fastas(getorganelle_dir):
@@ -44,13 +32,6 @@ def renamed(recs, sample, locus):
         topo = "circular" if "circular" in name.lower() else "linear"
         out.append((f"{sample}|{locus}|{i} {topo} length={len(seq)}", seq))
     return out
-
-
-def write_fasta(recs, fh):
-    for name, seq in recs:
-        fh.write(f">{name}\n")
-        for i in range(0, len(seq), 80):
-            fh.write(seq[i:i + 80] + "\n")
 
 
 if __name__ == "__main__":

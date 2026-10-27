@@ -6,3 +6,5 @@ dependencies:
   - python =3.10
   - getorganelle =1.7.7.1
   - spades =3.15.5
+  - blast =2.15.0       # unpinned, the solver picks blast 2.5.0 (2018) and label search finds nothing
+  - bowtie2 =2.4.5

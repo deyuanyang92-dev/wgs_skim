@@ -62,7 +62,7 @@ def gene_count(path):
     return {k: len(re.findall(rf"^ {{5}}{k} ", t, re.M)) for k in ("CDS", "tRNA", "rRNA")}
 
 
-cols = ["sample", "clean_gb", "q30", "mt_length", "mt_circular", "mt_round", "mt_genes", "mt_topology",
+cols = ["sample", "clean_gb", "q30", "mt_length", "mt_circular", "mt_source", "mt_genes", "mt_topology", "mt_end_diagnosis",
         "nr_length", "nr_topology", "spades_n50", "spades_total_mb", "busco", "genome_size_mb",
         "heterozygosity_pct", "blast_mt", "blast_nr"]
 rows = {s: {c: "" for c in cols} | {"sample": s} for s in samples}
@@ -73,7 +73,8 @@ for s, f in by_sample(inp.fastp).items():
 for s, f in by_sample(inp.get("mt")).items():
     j = json.load(open(f))
     rows[s].update(mt_length=j["length"] or "", mt_circular="yes" if j["circular"] else ("no" if j["length"] else "failed"),
-                   mt_round=j["round"])
+                   mt_source=j["note"] if j.get("source") == "spades" else "; ".join(x for x in (
+                       f"GetOrganelle {j['round']}" + (f" ({j['stop']})" if j.get("stop") else ""), j.get("note")) if x))
 for s, f in by_sample(inp.get("nr")).items():
     lens = fasta_lengths(f)
     rows[s]["nr_length"] = ",".join(map(str, lens))
@@ -92,14 +93,17 @@ for s, f in by_sample(inp.get("topology")).items():
         for r in csv.DictReader(open(f), delimiter="\t"):
             key = "mt_topology" if "|mt|" in r["contig"] else "nr_topology"
             rows[s][key] = ",".join(x for x in (rows[s][key], r["verdict"]) if x)
+            if key == "mt_topology" and r.get("end_diagnosis"):
+                rows[s]["mt_end_diagnosis"] = r["end_diagnosis"]
 if inp.get("blast") and Path(inp.blast).stat().st_size:
     best = {}
     for r in csv.DictReader(open(inp.blast, encoding="utf-8-sig"), delimiter="\t"):
         best.setdefault(r["qseqid"], r)       # rows are sorted best first
     for q, r in best.items():
-        s, locus = q.split("|")[:2]
-        if s in rows and locus in ("mt", "nr") and not rows[s][f"blast_{locus}"]:
-            rows[s][f"blast_{locus}"] = f"{r.get('organism', '')} ({float(r['pident']):.1f}%, qcov {r.get('qcovs', '')}%)"
+        s, locus, what = (q.split("|") + ["", ""])[:3]
+        if s in rows and locus in ("mt", "nr"):
+            hit = f"{what}: {r.get('organism', '')} ({float(r['pident']):.1f}%, qcov {r.get('qcovs', '')}%)"
+            rows[s][f"blast_{locus}"] = "; ".join(x for x in (rows[s][f"blast_{locus}"], hit) if x)
 
 with open(sm.output.tsv, "w", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
