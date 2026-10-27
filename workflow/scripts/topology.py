@@ -12,6 +12,9 @@ C. If the ends do not join: read pairs leaving the end outwards with the mate le
 verdicts: circular_validated, circular_weak (0.2-0.5 x control), circular_repeat_junction (> 2 x: junction inside a
 repeat, length uncertain), circular_rejected (overlap but no spanning reads), linear_gap_circular, linear_unjoined,
 *_low_reads (control < 5 reads).
+params.mode: auto = only linear mitogenomes are checked (circular ones are listed as not read-checked); yes = every
+sequence, the rDNA too (its "circle" is the tandem repeat unit). Short reads can show that a junction is real, but
+never prove a linear molecule: linear_unjoined may be a gap longer than the insert size (long reads / PCR needed).
 """
 import csv
 import re
@@ -187,7 +190,14 @@ def map_reads(ref_seq, name, wd, reads):
 out_dir = Path(sm.output.tsv).parent
 wd = out_dir / "work"
 wd.mkdir(parents=True, exist_ok=True)
-recs = [(n.split()[0], q) for f in sm.input.fasta for n, q in read_fasta(f)]
+recs, skipped = [], []
+for f in sm.input.fasta:
+    for n, q in read_fasta(f):
+        # auto: reads only for linear mitogenomes; circular ones were closed by the assembler / circularize step
+        if sm.params.mode == "auto" and ("|mt|" not in n or " circular" in n):
+            skipped.append((n.split()[0], len(q), "circular: not read-checked" if " circular" in n else "rDNA: not checked"))
+        else:
+            recs.append((n.split()[0], q))
 ann = genbank_cds(sm.input.annotation) if sm.input.get("annotation") else []
 
 rows = []
@@ -244,6 +254,7 @@ if recs:
         if verdict in ("circular_validated", "circular_repeat_junction"):
             write_fasta(out_dir / f"{name.replace('|', '_')}.circular.fasta", [(name, circle)])
 
+rows += [dict(sample=sm.wildcards.sample, contig=n, length=L, verdict=v) for n, L, v in skipped]
 fields = ["sample", "contig", "length", "circle_length", "overlap_bp", "split_at", "junction_reads",
           "control_reads_median", "bridging_pairs", "gap_estimate_bp", "end_clip", "verdict", "end_diagnosis"]
 with open(sm.output.tsv, "w", newline="") as fh:

@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
-from seqtools import find_circle, read_fasta, write_fasta  # noqa: E402
+from circularize import circularize  # noqa: E402
+from seqtools import read_fasta, write_fasta  # noqa: E402
 
 sm = snakemake  # noqa: F821
 sys.stderr = open(sm.log[0], "w")
@@ -70,10 +71,17 @@ if not status["circular"] and scaffolds and Path(scaffolds).stat().st_size:
         need = 0.9 * qlen if go else 0.5 * qlen
         cand = {sid for sid, bp in hits.items() if bp >= need}
         seqs = scaffold_seqs(scaffolds, cand)
+        # circularize (no reads): assembly-graph closure, end overlap, or several pieces joined end to end
+        graph_dir = next((d for d in (Path(scaffolds).parent / "spades", Path(scaffolds).parent)
+                          if (d / "scaffolds.paths").exists()), None)
+        rows, outs = circularize(list(seqs.items()), graph_dir)
+        how = {r["contig"]: r for r in rows}
+        if any(r["method"] == "join" for r in rows):
+            seqs = {"joined": outs[0][1]}
         best = None
         for sid, s in seqs.items():
-            c = find_circle(s)
-            circle = s[c["anchor"]:c["anchor"] + c["P"]] if c else None
+            r = how.get(sid) or next(r for r in rows if r["method"] == "join")
+            circle = dict(outs).get(sid, s) if r["method"] != "not_circular" else None
             if circle and len(circle) >= 0.98 * go_len:
                 score = (1, len(circle))
             elif len(s) >= go_len + 100:
@@ -88,7 +96,9 @@ if not status["circular"] and scaffolds and Path(scaffolds).stat().st_size:
             _, sid, seq, circ = best
             final = [(f"{sample}|mt|1 {'circular' if circ else 'linear'} length={len(seq)} source=spades:{sid}", seq)]
             source = "spades"
-            note = f"SPAdes {sid} {'circular' if circ else 'linear'} {len(seq)} bp vs GetOrganelle {go_len} bp"
+            r = how.get(sid) or next(r for r in rows if r["method"] == "join")
+            note = (f"SPAdes {sid} {'circular (' + r['method'] + ')' if circ else 'linear'} {len(seq)} bp vs "
+                    f"GetOrganelle {go_len} bp" + (f"; repeat units {r['repeats']}" if r["repeats"] else ""))
         print(f"candidates {sorted(cand)}; chosen: {note or 'GetOrganelle'}", file=sys.stderr)
 
 with open(sm.output.fasta, "w") as fh:

@@ -107,3 +107,52 @@ rule nr_annotate:
         cp {params.wd}/out/nuc_annotation.gb {output.gb}
         cp {params.wd}/out/nuc_features.tsv {output.tsv}
         """
+
+
+rule nuc_markers:
+    """Multi-copy nuclear markers in the whole-genome assembly with `mitom nuc`: rDNA (18S, ITS1, 5.8S, ITS2, 28S)
+    and histones (H1, H2A, H2B, H3, H4); every copy plus one consensus per gene (contigs used / dropped and why)."""
+    input:
+        scaffolds=rules.spades.output.scaffolds,
+        db=MITOM_NUC_DB,
+    output:
+        features=f"{OUT}/nuclear/{{sample}}/{{sample}}.nuc_features.tsv",
+        consensus=f"{OUT}/nuclear/{{sample}}/{{sample}}.nuc_consensus.tsv",
+    params:
+        wd=lambda w, output: str(Path(output.features).parent / "mitom_nuc"),
+        mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
+    log:
+        f"{OUT}/logs/nuc_markers/{{sample}}.log",
+    benchmark:
+        f"{OUT}/benchmarks/nuc_markers/{{sample}}.tsv"
+    threads: 16
+    conda:
+        "../envs/mitom.yaml"
+    shell:
+        """
+        if [ ! -s {input.scaffolds} ]; then echo "no assembly" > {log}; : > {output.features}; : > {output.consensus}; exit 0; fi
+        rm -rf {params.wd}
+        python {params.mitom}/mitom nuc annotate -i {input.scaffolds} -o {params.wd} --genes rdna,histone \
+            --threads {threads} > {log} 2>&1
+        cp {params.wd}/nuc_features.tsv {output.features}
+        cp {params.wd}/consensus.tsv {output.consensus}
+        """
+
+
+rule nuc_copies:
+    """Copy number of each marker: k-mer coverage of its contigs / median coverage of the contigs carrying BUSCO
+    complete single-copy genes (both from the SPAdes headers, so read length and k cancel out)."""
+    input:
+        features=rules.nuc_markers.output.features,
+        consensus=rules.nuc_markers.output.consensus,
+        busco=rules.busco.output.summary,
+    output:
+        tsv=f"{OUT}/nuclear/{{sample}}/{{sample}}.copy_number.tsv",
+    params:
+        busco_dir=lambda w, input: str(Path(input.busco).parent / "busco"),
+    log:
+        f"{OUT}/logs/nuc_copies/{{sample}}.log",
+    conda:
+        "../envs/python.yaml"
+    script:
+        "../scripts/nuc_copies.py"

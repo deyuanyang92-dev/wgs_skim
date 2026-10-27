@@ -24,9 +24,10 @@ properties:
   mito: {type: boolean, default: true}
   nr: {type: boolean, default: true}
   assembly: {type: boolean, default: true}
+  nuc_markers: {type: boolean, default: true}
   genome_size: {type: boolean, default: true}
   annotate: {type: boolean, default: true}
-  topology: {type: boolean, default: true}
+  topology: {enum: [auto, "yes", "no", true, false], default: auto}
   blast: {type: boolean, default: true}
   getorganelle_kmers: {type: string, default: "21,45,65,85,105"}
   getorganelle_rounds: {type: integer, minimum: 1, default: 10}

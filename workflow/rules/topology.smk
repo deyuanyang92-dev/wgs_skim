@@ -10,6 +10,7 @@ rule topology:
         tsv=f"{OUT}/topology/{{sample}}/{{sample}}.topology.tsv",
     params:
         pairs=config["topology_pairs"],
+        mode=TOPOLOGY,
     log:
         f"{OUT}/logs/topology/{{sample}}.log",
     benchmark:

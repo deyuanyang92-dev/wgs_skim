@@ -6,6 +6,7 @@
     wgs_skim run -r rawdata --steps fastp,spades,busco   # only some steps (plus what they need)
     wgs_skim install                                  # create all software environments once
     wgs_skim samples -r rawdata                       # show detected sample names
+    wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
     wgs_skim config > my.yaml                         # all options with comments
 
 Anything after `--` goes to snakemake unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
@@ -104,6 +105,13 @@ def cmd_samples(args, passthrough):
     return 0
 
 
+def cmd_circularize(args, passthrough):
+    """Circularize mitochondrial contigs (MitoFinder / SPAdes) without reads; see workflow/scripts/circularize.py."""
+    cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "circularize.py"), "-i", args.input,
+           "-o", args.outdir, "--prefix", args.prefix] + (["--spades", args.spades] if args.spades else [])
+    return subprocess.run(cmd).returncode
+
+
 def cmd_config(args, passthrough):
     sys.stdout.write((workflow_root() / "config" / "config.yaml").read_text())
     return 0
@@ -149,6 +157,13 @@ def main(argv=None):
     s.add_argument("-r", "--reads_dir")
     s.add_argument("-s", "--samples")
     s.set_defaults(func=cmd_samples)
+
+    z = sub.add_parser("circularize", help="circularize mitochondrial contigs (e.g. MitoFinder output) without reads")
+    z.add_argument("-i", "--input", required=True, help="mt contigs FASTA, e.g. MitoFinder <sample>_all_mt.fasta")
+    z.add_argument("-o", "--outdir", default="circularize")
+    z.add_argument("--spades", help="SPAdes output directory: use its assembly graph (strongest check, fills gaps)")
+    z.add_argument("--prefix", default="sample")
+    z.set_defaults(func=cmd_circularize)
 
     c = sub.add_parser("config", help="print the default configuration with comments")
     c.set_defaults(func=cmd_config)

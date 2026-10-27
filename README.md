@@ -158,15 +158,49 @@ animal groups.
 4. Still not circular: the SPAdes whole-genome assembly is searched for the mitogenome (`mt_from_spades`). A scaffold
    that contains the GetOrganelle result and closes into a circle replaces it — whole-genome assembly has no read
    recruitment step and can get through control regions where GetOrganelle stops. Longer *linear* scaffolds are not
-   used (their extra ends were collapsed repeats or unsupported in tests), only reported.
+   used (their extra ends were collapsed repeats or unsupported in tests), only reported. Circularization needs no
+   reads (see below).
 5. MitoM annotates the result (cox1 start, NCBI checks).
-6. `topology` checks the result with the reads: the circle is cut inside *nad5* and reads spanning the original
-   ends must exist for a real circle (Ahuja et al. 2024, GBE). For linear results `end_diagnosis` says why each end
-   stops — e.g. "reads continue into a simple repeat ((AT)n)", "coverage drops", "homopolymer" — which tells you
-   whether long-range PCR / long reads are needed.
+6. `topology` (default `auto`: only linear mitogenomes; `yes`: everything, also the rDNA repeat unit; `no`) checks
+   with the reads: the circle is cut inside *nad5* and reads spanning the original ends must exist for a real
+   circle (Ahuja et al. 2024, GBE). For linear results `end_diagnosis` says why each end stops — e.g. "reads
+   continue into a dinucleotide repeat, in different directions: repeat shared with other loci", "coverage drops",
+   "homopolymer" — which tells you whether long-range PCR / long reads are needed.
 7. BLAST (species check) uses the queries you choose, several at once: whole sequences (`full`) and/or genes cut
    from the annotations — mitogenome genes from MitoM (default `cox1`, the COI barcode; `16s`, `12s`, `cytb` ...),
    rDNA regions from `mitom nuc` (default `18S,ITS,28S`). Hits come with GenBank organism and taxonomy.
+
+### Circular or linear?
+
+| evidence | needs | shows |
+|---|---|---|
+| ends overlap | sequence | the assembler *treated* it as a circle |
+| path closes in the assembly graph | SPAdes graph | stronger: the graph itself closes |
+| reads span the junction | short reads | a real circle (`topology`) |
+| no reads span the junction | short reads | only "not joined": linear **or** a gap longer than the insert size |
+| long reads ending at the same place, terminal inverted repeats / telomere-like ends, PCR across the ends fails while internal PCR works | long reads / lab | a truly linear molecule |
+
+Short reads can never prove a linear mitogenome. All annelid mitogenomes known so far are circular; a linear annelid
+assembly almost always means an unfinished control region (see `end_diagnosis`).
+
+**Circularization without reads** (`wgs_skim circularize`, also used inside the workflow for SPAdes): MitoFinder and
+MitoHiFi accept a circle only for a self-BLAST overlap >= 220 bp within 40 bp of both ends, but short-read assemblers
+leave ~k-1 bp, often with ragged ends — circular contigs are then reported as "not found". `circularize` checks, in
+order: the contig's path closing in the SPAdes assembly graph (also reports tandem repeat units whose copy number
+the graph cannot resolve), an end overlap >= 25 bp tolerant of ragged ends, and several pieces joined end to end.
+
+```bash
+wgs_skim circularize -i mitofinder/<sample>_all_mt.fasta --spades spades_dir/ -o circ/ --prefix <sample>
+```
+
+On MJ20260820041: CHY006 (MitoFinder "not found") -> circular 16,770 bp (58 bp overlap); CHY007 -> circular, with a
+control-region repeat (129 + 119 bp unit used 4-5 times in the graph path).
+
+### Multi-copy nuclear markers
+
+`nuc_markers` (default on, needs the SPAdes assembly) annotates rDNA (18S, ITS1, 5.8S, ITS2, 28S) and histones
+(H1, H2A, H2B, H3, H4) in the whole-genome assembly with `mitom nuc`: every copy, one consensus per gene, and the
+copy number = coverage of the gene's contigs / coverage of BUSCO single-copy contigs.
 
 ## Output
 
@@ -179,6 +213,7 @@ wgs_skim_results/
 ├── rdna/<sample>/<sample>.nr.fasta   18S-ITS-28S (+ .nr.gb / .nr_features.tsv: 18S ITS1 5.8S ITS2 28S, mitom nuc)
 ├── annotation/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
 ├── topology/<sample>/         read-based circular / linear check, end diagnosis
+├── nuclear/<sample>/          rDNA + histone copies, consensus, copy_number.tsv
 ├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary
 ├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
 ├── blast/blast_topn.tsv       COX1 / rDNA top hits with GenBank organism and taxonomy

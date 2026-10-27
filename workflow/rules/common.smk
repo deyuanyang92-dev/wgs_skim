@@ -31,9 +31,10 @@ else:
 
 # ── Steps: `steps` runs only some parts (e.g. "fastp,spades,busco"); empty = everything switched on ──────
 STEP_ALIASES = {"qc": "fastp", "meangs-getorganelle": "mito", "mitogenome": "mito", "rdna": "nr", "assembly": "spades",
-                "jellyfish": "genome_size", "genomescope": "genome_size", "mitoz": "annotate", "mitom": "annotate", "report": "summary"}
+                "jellyfish": "genome_size", "genomescope": "genome_size", "mitoz": "annotate", "mitom": "annotate",
+                "nuc": "nuclear", "histone": "nuclear", "histones": "nuclear", "report": "summary"}
 STEPS_ALL = ["fastp", "meangs", "mito", "getorganelle", "nr", "spades", "busco", "genome_size", "annotate", "topology",
-             "blast", "summary"]
+             "blast", "nuclear", "summary"]
 STEPS = [STEP_ALIASES.get(x, x) for x in re.split(r"[,\s]+", str(config.get("steps") or "").strip()) if x]
 for x in STEPS:
     if x not in STEPS_ALL:
@@ -42,11 +43,12 @@ if STEPS:
     want = set(STEPS)
     genes_wanted = any(x.strip() not in ("", "full") for x in f"{config['blast_mt']},{config['blast_nr']}".split(","))
     config["annotate"] = bool(want & {"annotate", "topology"}) or ("blast" in want and genes_wanted)
-    config["topology"] = "topology" in want
+    config["topology"] = "yes" if "topology" in want else "no"
     config["blast"] = "blast" in want
     config["mito"] = bool(want & {"mito", "getorganelle", "annotate", "topology", "blast"})
     config["nr"] = bool(want & {"nr", "blast"})
-    config["assembly"] = bool(want & {"spades", "busco"})
+    config["assembly"] = bool(want & {"spades", "busco", "nuclear"})
+    config["nuc_markers"] = "nuclear" in want
     config["genome_size"] = "genome_size" in want
     if "getorganelle" in want and not want & {"mito", "meangs"}:
         config["meangs"] = False                                     # GetOrganelle with its own animal_mt seeds
@@ -54,6 +56,10 @@ if STEPS:
 # BLAST queries: "full" (the whole assembled sequence) and/or genes cut from the annotations
 BLAST_MT = [x.strip() for x in str(config["blast_mt"]).split(",") if x.strip()]
 BLAST_NR = [x.strip() for x in str(config["blast_nr"]).split(",") if x.strip()]
+
+# topology: auto (only linear mitogenomes) | yes | no; YAML yes/no/true/false arrive as booleans
+TOPOLOGY = {True: "yes", False: "no"}.get(config["topology"], str(config["topology"]))
+config["topology"] = TOPOLOGY != "no"
 
 OUT = config["outdir"].rstrip("/")
 RES = Path(workflow.basedir).parent / "resources"           # bundled files (read-only is fine)
@@ -100,6 +106,7 @@ def final_outputs():
             "genome_size": [rules.genomescope.output.summary],
             "annotate": [rules.mitom_annotate.output.gb],
             "topology": [rules.topology.output.tsv],
+            "nuclear": [rules.nuc_copies.output.tsv],
         }
         out = [f for x in STEPS for t in targets.get(x, []) for f in expand(t, sample=s)]
         if "blast" in STEPS:
@@ -160,6 +167,8 @@ def summary_inputs(wildcards):
     if config["assembly"]:
         d["scaffolds"] = expand(rules.spades.output.scaffolds, sample=s)
         d["busco"] = expand(rules.busco.output.summary, sample=s)
+    if config["assembly"] and config["nuc_markers"]:
+        d["nuclear"] = expand(rules.nuc_copies.output.tsv, sample=s)
     if config["genome_size"]:
         d["genomescope"] = expand(rules.genomescope.output.summary, sample=s)
     if config["annotate"] and config["mito"]:

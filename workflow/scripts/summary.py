@@ -64,7 +64,7 @@ def gene_count(path):
 
 cols = ["sample", "clean_gb", "q30", "mt_length", "mt_circular", "mt_source", "mt_genes", "mt_topology", "mt_end_diagnosis",
         "nr_length", "nr_topology", "spades_n50", "spades_total_mb", "busco", "genome_size_mb",
-        "heterozygosity_pct", "blast_mt", "blast_nr"]
+        "heterozygosity_pct", "rdna_copies", "histones", "blast_mt", "blast_nr"]
 rows = {s: {c: "" for c in cols} | {"sample": s} for s in samples}
 
 for s, f in by_sample(inp.fastp).items():
@@ -95,6 +95,12 @@ for s, f in by_sample(inp.get("topology")).items():
             rows[s][key] = ",".join(x for x in (rows[s][key], r["verdict"]) if x)
             if key == "mt_topology" and r.get("end_diagnosis"):
                 rows[s]["mt_end_diagnosis"] = r["end_diagnosis"]
+for s, f in by_sample(inp.get("nuclear")).items():
+    cn = {r["gene"]: r for r in csv.DictReader(open(f), delimiter="\t")}
+    rdna = [cn[g]["copy_number"] for g in ("18S", "28S") if cn.get(g, {}).get("copy_number")]
+    rows[s]["rdna_copies"] = f"~{max(rdna, key=float)}" if rdna else ""
+    rows[s]["histones"] = ", ".join(f"{g} x{cn[g]['copy_number'] or '?'}" + (f" ({cn[g]['partial']}-partial)" if cn[g]["partial"] else "")
+                                    for g in ("H1", "H2A", "H2B", "H3", "H4") if g in cn)
 if inp.get("blast") and Path(inp.blast).stat().st_size:
     best = {}
     for r in csv.DictReader(open(inp.blast, encoding="utf-8-sig"), delimiter="\t"):

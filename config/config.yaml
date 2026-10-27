@@ -27,16 +27,18 @@ busco_lineage: ""      # lineage name (downloaded once, e.g. metazoa_odb12) or p
 # ── Steps ─────────────────────────────────────────────────────────────────────
 # steps: run only some parts, comma separated; upstream steps they need run too (spades needs fastp ...).
 #   fastp | meangs | mito (MEANGS -> GetOrganelle -> reseeded rounds) | getorganelle (no MEANGS seed) | nr |
-#   spades | busco | genome_size | annotate | topology | blast | summary
+#   spades | busco | genome_size | annotate | topology | blast | nuclear (rDNA + histones in the assembly) | summary
 #   e.g. steps: "fastp,spades,busco"     empty = everything switched on below
 steps: ""
 meangs: true           # MEANGS seed for GetOrganelle (false: GetOrganelle's own animal_mt seeds)
 mito: true             # MEANGS seed -> GetOrganelle mitogenome (+ reseeded iterations if not circular)
 nr: true               # GetOrganelle nuclear rDNA (18S-ITS-28S)
 assembly: true         # SPAdes whole-genome assembly + BUSCO
+nuc_markers: true      # rDNA (18S ITS1 5.8S ITS2 28S) + histones (H1-H4) in the assembly, copy numbers (mitom nuc)
 genome_size: true      # jellyfish + GenomeScope2
 annotate: true         # MitoM annotation of the final mitogenome
-topology: true         # read-based check that circular / linear mitogenomes are real (junction-spanning reads)
+topology: auto         # read-based check of circular / linear (junction-spanning reads): auto = only linear
+                       #   mitogenomes; yes = every sequence, also the rDNA (tandem repeat unit); no = never
 blast: true            # BLAST mitogenome and rDNA, top hits with GenBank taxonomy (species check)
 
 # ── Mitogenome ────────────────────────────────────────────────────────────────
