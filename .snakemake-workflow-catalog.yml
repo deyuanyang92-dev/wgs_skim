@@ -1,0 +1,9 @@
+usage:
+  mandatory-flags:
+    desc: "Software is deployed with conda; give the reads directory."
+    flags: "--sdm conda --config reads_dir=/path/to/rawdata"
+  software-stack-deployment:
+    conda: true
+    apptainer: false
+    apptainer+conda: false
+  report: false

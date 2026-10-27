@@ -1,0 +1,11 @@
+# Loaded automatically by Snakemake 8+ (disable with --workflow-profile none).
+software-deployment-method: conda
+conda-frontend: conda
+printshellcmds: true
+rerun-incomplete: true
+keep-going: true
+retries: 1                 # SPAdes gets 1.5x memory on the retry
+# per-rule threads, e.g. for a large server:
+# set-threads:
+#   spades: 48
+#   getorganelle_mt: 16

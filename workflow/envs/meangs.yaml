@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+  - yccscucib
+  - nodefaults
+dependencies:
+  - python =3.9
+  - meangs =1.2.1

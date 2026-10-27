@@ -1,0 +1,28 @@
+# wgs_skim: genome-skimming workflow for animal mitogenomes, nuclear rDNA and genome surveys.
+#   snakemake --cores 32 --sdm conda --config reads_dir=/path/to/rawdata
+# See README.md and config/README.md.
+from pathlib import Path
+
+from snakemake.utils import min_version
+
+min_version("8.0")
+
+
+# defaults ship with the workflow; --configfile / --config override them
+configfile: str(Path(workflow.basedir).parent / "config" / "config.yaml")
+
+
+include: "rules/common.smk"
+include: "rules/qc.smk"
+include: "rules/mito.smk"
+include: "rules/assembly.smk"
+include: "rules/genome_size.smk"
+include: "rules/annotate.smk"
+include: "rules/topology.smk"
+include: "rules/blast.smk"
+include: "rules/report.smk"
+
+
+rule all:
+    input:
+        final_outputs(),

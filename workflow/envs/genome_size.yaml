@@ -1,0 +1,7 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - kmer-jellyfish =2.3.1
+  - genomescope2 =2.1.0

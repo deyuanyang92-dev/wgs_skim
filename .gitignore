@@ -1,0 +1,11 @@
+results/
+logs/
+.snakemake/
+resources/getorganelle_db/
+resources/busco_downloads/
+__pycache__/
+*.pyc
+.test/results/
+*.egg-info/
+build/
+dist/

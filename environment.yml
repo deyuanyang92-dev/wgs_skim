@@ -1,0 +1,11 @@
+# conda env create -f environment.yml && conda activate wgs_skim && pip install . && wgs_skim install
+name: wgs_skim
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python =3.12
+  - snakemake =8.18
+  - pyyaml
+  - pip

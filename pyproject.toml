@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wgs_skim"
+dynamic = ["version"]
+description = "Genome-skimming workflow (Snakemake) for animal mitogenomes, nuclear rDNA and genome surveys"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "De-Yuan Yang" }]
+dependencies = ["snakemake>=8,<10", "pyyaml"]
+
+[project.urls]
+Homepage = "https://github.com/deyuanyang92-dev/wgs_skim"
+
+[project.scripts]
+wgs_skim = "wgs_skim.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "wgs_skim.__version__" }
+
+# workflow/, config/ and resources/ stay at the repository root (standard Snakemake layout) and are shipped
+# inside the package so that `pip install` gives a working `wgs_skim run`.
+[tool.setuptools]
+package-dir = { "wgs_skim" = "src/wgs_skim", "wgs_skim.workflow" = "workflow", "wgs_skim.config" = "config", "wgs_skim.resources" = "resources" }
+packages = ["wgs_skim", "wgs_skim.workflow", "wgs_skim.config", "wgs_skim.resources"]
+
+[tool.setuptools.package-data]
+"wgs_skim.workflow" = ["Snakefile", "rules/*.smk", "envs/*.yaml", "scripts/*.py", "schemas/*.yaml", "profiles/default/*.yaml"]
+"wgs_skim.config" = ["*.yaml", "*.md"]
+"wgs_skim.resources" = ["rdna/*.fasta"]
