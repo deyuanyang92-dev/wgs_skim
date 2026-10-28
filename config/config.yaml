@@ -57,6 +57,7 @@ nr_seed: ""            # seed FASTA; empty = bundled resources/rdna (polychaete 
 nr_label: ""           # label FASTA (--genes); empty = bundled
 histone_seed: ""       # histone cluster seed FASTA; empty = bundled resources/histone (annelid H1-H4 cluster copies)
 histone_label: ""      # its label FASTA (H1-H4 genes); empty = bundled
+nuclear_max_gb: "5,10"  # Gb of reads per GetOrganelle round for rDNA / histones: round 2 (10 Gb, seeded with round 1) only when round 1 does not close the unit
 
 # ── Whole-genome assembly ─────────────────────────────────────────────────────
 spades_min_clean_gb: 0           # skip SPAdes for samples with less clean data than this (0 = assemble all)

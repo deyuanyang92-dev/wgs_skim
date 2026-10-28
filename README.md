@@ -325,11 +325,13 @@ For an existing results directory (this workflow's or Temp_scripts/wgs_skim_pipe
 command, resumable (finished assemblies reused; annotations redone when MitoM changes):
 
 ```bash
-wgs_skim nuclear --results results/ -o nuclear_markers/ [--samples A,B] [--markers rdna,histone] [-j 3] [--all-reads]
+wgs_skim nuclear --results results/ -o nuclear_markers/ [--samples A,B] [--markers rdna,histone] [-j 3] [--max-gb 5,10]
 ```
 
 -> `nuclear_markers/{rdna,histone}/{getorganelle,annotation,spades_mitom}/<sample>/`, `summary.tsv` (every sample x
-gene), `README.txt`. `--all-reads`: the histone GetOrganelle with all reads, -R 20, k 21-127 (the user's 2024 setting).
+gene), `README.txt`. Reads: multi-copy units need little data - round 1 at most 5 Gb; only when the unit does not
+close, round 2 with 10 Gb seeded with round 1 (`--max-gb`, config `nuclear_max_gb`; `<marker>/getorganelle/<sample>/rounds.tsv`).
+An rDNA assembly the results directory already has counts as round 1.
 
 ## Output
 

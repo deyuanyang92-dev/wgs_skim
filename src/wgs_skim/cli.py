@@ -172,7 +172,7 @@ def cmd_nuclear(args, passthrough):
     cmd = [str(py), str(workflow_root() / "workflow" / "scripts" / "nuclear_markers.py"), "batch",   # Biopython
            "--results", args.results, "-o", args.outdir, "--markers", args.markers, "-j", str(args.jobs),
            "--mitom", str(mitom), "--mitom-python", str(py), "--getorganelle", str(go)]
-    cmd += (["--samples", args.samples] if args.samples else []) + (["--all-reads"] if args.all_reads else [])
+    cmd += (["--samples", args.samples] if args.samples else []) + ["--max-gb", args.max_gb]
     return subprocess.run(cmd + passthrough).returncode
 
 
@@ -260,7 +260,8 @@ def main(argv=None):
     n.add_argument("--samples", help="only these samples (comma-separated)")
     n.add_argument("--markers", default="rdna,histone")
     n.add_argument("-j", "--jobs", type=int, default=3, help="samples at a time (GetOrganelle 16 threads each)")
-    n.add_argument("--all-reads", action="store_true", help="histone GetOrganelle with all reads, -R 20, k 21-127")
+    n.add_argument("--max-gb", default="5,10", help="Gb of reads per GetOrganelle round (round 2, seeded with "
+                   "round 1, only when round 1 does not close the unit)")
     n.add_argument("--mitom", help="MitoM checkout (default: the workflow's, <WGS_SKIM_HOME>/db/mitom_nuc/Mitom)")
     n.add_argument("--conda-prefix", default=default_conda_prefix(), help="where the software environments are")
     n.set_defaults(func=cmd_nuclear)

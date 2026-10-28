@@ -4,7 +4,8 @@
 
 
 rule getorganelle_nr:
-    """Nuclear rDNA (18S-ITS-28S) with GetOrganelle -F anonym and the bundled seed / label."""
+    """Nuclear rDNA (18S-ITS-28S) with GetOrganelle -F anonym and the bundled seed / label; rounds of at most
+    nuclear_max_gb Gb of reads (5, then 10 seeded with round 1 when the unit does not close)."""
     input:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
@@ -14,9 +15,11 @@ rule getorganelle_nr:
         fasta=f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta",
     params:
         out=lambda w, output: str(Path(output.fasta).parent / "getorganelle"),
+        nm=str(Path(workflow.basedir) / "scripts" / "nuclear_markers.py"),
         collect=str(Path(workflow.basedir) / "scripts" / "collect_fasta.py"),
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
+        gb=config["nuclear_max_gb"],
     log:
         f"{OUT}logs/getorganelle_nr/{{sample}}.log",
     benchmark:
@@ -26,9 +29,10 @@ rule getorganelle_nr:
         "../envs/getorganelle.yaml"
     shell:
         """
-        get_organelle_from_reads.py -1 {input.r1} -2 {input.r2} -o {params.out} -F anonym \
-            -s {input.seed} --genes {input.label} -P 0 -R {params.R} -k {params.k} -t {threads} --overwrite > {log} 2>&1 \
-            || echo "[wgs_skim] GetOrganelle rDNA failed (rc=$?)" >> {log}
+        rm -rf {params.out}
+        python {params.nm} assemble --kind rdna -1 {input.r1} -2 {input.r2} -o {params.out} -t {threads} \
+            --kmers {params.k} --rounds {params.R} --max-gb {params.gb} --seed {input.seed} --label {input.label} \
+            > {log} 2>&1 || echo "[wgs_skim] GetOrganelle rDNA failed (rc=$?)" >> {log}
         python {params.collect} {params.out} {wildcards.sample} nr > {output.fasta}
         """
 
@@ -113,7 +117,7 @@ rule nuc_copies:
 
 rule getorganelle_histone:
     """Histone cluster (H1, H2A, H2B, H3, H4) with GetOrganelle -F anonym and the bundled H1-H4 seed / label
-    (resources/histone; an H3-only label kept only the H3 piece). Same read settings as the rDNA."""
+    (resources/histone; an H3-only label kept only the H3 piece). Rounds of reads as for the rDNA."""
     input:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
@@ -127,6 +131,7 @@ rule getorganelle_histone:
         collect=str(Path(workflow.basedir) / "scripts" / "collect_fasta.py"),
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
+        gb=config["nuclear_max_gb"],
     log:
         f"{OUT}logs/getorganelle_histone/{{sample}}.log",
     benchmark:
@@ -136,10 +141,10 @@ rule getorganelle_histone:
         "../envs/getorganelle.yaml"
     shell:
         """
-        rm -f {params.out}/done
-        python {params.nm} histone -1 {input.r1} -2 {input.r2} -o {params.out} -t {threads} --kmers {params.k} \
-            --rounds {params.R} --seed {input.seed} --label {input.label} > {log} 2>&1 \
-            || echo "[wgs_skim] GetOrganelle histone failed (rc=$?)" >> {log}
+        rm -rf {params.out}
+        python {params.nm} assemble --kind histone -1 {input.r1} -2 {input.r2} -o {params.out} -t {threads} \
+            --kmers {params.k} --rounds {params.R} --max-gb {params.gb} --seed {input.seed} --label {input.label} \
+            > {log} 2>&1 || echo "[wgs_skim] GetOrganelle histone failed (rc=$?)" >> {log}
         python {params.collect} {params.out} {wildcards.sample} histone > {output.fasta}
         """
 
