@@ -61,7 +61,7 @@ BLAST_NR = [x.strip() for x in str(config["blast_nr"]).split(",") if x.strip()]
 TOPOLOGY = {True: "yes", False: "no"}.get(config["topology"], str(config["topology"]))
 config["topology"] = TOPOLOGY != "no"
 
-OUT = config["outdir"].rstrip("/")
+OUT = "" if config["outdir"].strip("./") == "" else config["outdir"].rstrip("/") + "/"   # path prefix; "./x" makes Snakemake warn
 RES = Path(workflow.basedir).parent / "resources"           # bundled files (read-only is fine)
 DB = Path(config.get("db_dir") or RES).expanduser()            # downloaded databases (GetOrganelle, BUSCO)
 MITOM_DB = DB / "mitom"
@@ -114,11 +114,11 @@ def final_outputs():
         if "summary" in STEPS:
             out.append(rules.summary.output.tsv)
         return out
-    out = [f"{OUT}/summary/samples.tsv"]
+    out = [f"{OUT}summary/samples.tsv"]
     if config["mito"]:
-        out += expand(f"{OUT}/mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
+        out += expand(f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
     if config["nr"]:
-        out += expand(f"{OUT}/rdna/{{sample}}/{{sample}}.nr.fasta", sample=s)
+        out += expand(f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta", sample=s)
     return out
 
 

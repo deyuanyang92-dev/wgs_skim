@@ -12,7 +12,7 @@ rule mitom_db:
         url=MITOS_REF_URL,
         md5=MITOS_REF_MD5,
     log:
-        f"{OUT}/logs/mitom_db.log",
+        f"{OUT}logs/mitom_db.log",
     conda:
         "../envs/mitom.yaml"
     shell:
@@ -35,7 +35,7 @@ rule mitom_nuc_db:
     params:
         commit=config["mitom_nuc_commit"],
     log:
-        f"{OUT}/logs/mitom_nuc_db.log",
+        f"{OUT}logs/mitom_nuc_db.log",
     conda:
         "../envs/mitom.yaml"
     shell:
@@ -51,8 +51,8 @@ rule mitom_annotate:
         fasta=rules.mt_select.output.fasta,
         db=MITOM_DB,
     output:
-        gb=f"{OUT}/annotation/{{sample}}/{{sample}}.mt.gb",
-        tsv=f"{OUT}/annotation/{{sample}}/{{sample}}.mitom.tsv",
+        gb=f"{OUT}annotation/{{sample}}/{{sample}}.mt.gb",
+        tsv=f"{OUT}annotation/{{sample}}/{{sample}}.mitom.tsv",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom"),
         refdir=lambda w, input: config["mitos_refdir"] or f"{input.db}/mitos_refs",
@@ -60,9 +60,9 @@ rule mitom_annotate:
         clade=config["clade"],
         code=config["genetic_code"],
     log:
-        f"{OUT}/logs/mitom/{{sample}}.log",
+        f"{OUT}logs/mitom/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/mitom/{{sample}}.tsv"
+        f"{OUT}benchmarks/mitom/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/mitom.yaml"
@@ -87,13 +87,13 @@ rule nr_annotate:
         fasta=rules.getorganelle_nr.output.fasta,
         db=MITOM_NUC_DB,
     output:
-        gb=f"{OUT}/rdna/{{sample}}/{{sample}}.nr.gb",
-        tsv=f"{OUT}/rdna/{{sample}}/{{sample}}.nr_features.tsv",
+        gb=f"{OUT}rdna/{{sample}}/{{sample}}.nr.gb",
+        tsv=f"{OUT}rdna/{{sample}}/{{sample}}.nr_features.tsv",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom_nuc"),
         mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
     log:
-        f"{OUT}/logs/nr_annotate/{{sample}}.log",
+        f"{OUT}logs/nr_annotate/{{sample}}.log",
     threads: 4
     conda:
         "../envs/mitom.yaml"
@@ -116,15 +116,15 @@ rule nuc_markers:
         scaffolds=rules.spades.output.scaffolds,
         db=MITOM_NUC_DB,
     output:
-        features=f"{OUT}/nuclear/{{sample}}/{{sample}}.nuc_features.tsv",
-        consensus=f"{OUT}/nuclear/{{sample}}/{{sample}}.nuc_consensus.tsv",
+        features=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_features.tsv",
+        consensus=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_consensus.tsv",
     params:
         wd=lambda w, output: str(Path(output.features).parent / "mitom_nuc"),
         mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
     log:
-        f"{OUT}/logs/nuc_markers/{{sample}}.log",
+        f"{OUT}logs/nuc_markers/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/nuc_markers/{{sample}}.tsv"
+        f"{OUT}benchmarks/nuc_markers/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/mitom.yaml"
@@ -147,11 +147,11 @@ rule nuc_copies:
         consensus=rules.nuc_markers.output.consensus,
         busco=rules.busco.output.summary,
     output:
-        tsv=f"{OUT}/nuclear/{{sample}}/{{sample}}.copy_number.tsv",
+        tsv=f"{OUT}nuclear/{{sample}}/{{sample}}.copy_number.tsv",
     params:
         busco_dir=lambda w, input: str(Path(input.busco).parent / "busco"),
     log:
-        f"{OUT}/logs/nuc_copies/{{sample}}.log",
+        f"{OUT}logs/nuc_copies/{{sample}}.log",
     conda:
         "../envs/python.yaml"
     script:

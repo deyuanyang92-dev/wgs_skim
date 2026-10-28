@@ -4,7 +4,7 @@ rule blast:
     input:
         unpack(blast_inputs),
     output:
-        tsv=f"{OUT}/blast/blast_topn.tsv",
+        tsv=f"{OUT}blast/blast_topn.tsv",
     params:
         db=config["blast_db"],
         topn=config["blast_topn"],
@@ -13,9 +13,9 @@ rule blast:
         mt=BLAST_MT,
         nr=BLAST_NR,
     log:
-        f"{OUT}/logs/blast.log",
+        f"{OUT}logs/blast.log",
     benchmark:
-        f"{OUT}/benchmarks/blast.tsv"
+        f"{OUT}benchmarks/blast.tsv"
     threads: 8
     conda:
         "../envs/blast.yaml"

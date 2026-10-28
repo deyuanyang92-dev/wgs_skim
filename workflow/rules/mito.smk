@@ -6,7 +6,7 @@ rule getorganelle_db:
     output:
         directory(GETORG_DB),
     log:
-        f"{OUT}/logs/getorganelle_db.log",
+        f"{OUT}logs/getorganelle_db.log",
     conda:
         "../envs/getorganelle.yaml"
     shell:
@@ -19,16 +19,16 @@ rule meangs:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
     output:
-        seed=f"{OUT}/mito/{{sample}}/meangs/{{sample}}.seed.fasta",
+        seed=f"{OUT}mito/{{sample}}/meangs/{{sample}}.seed.fasta",
     params:
         wd=lambda w, output: str(Path(output.seed).parent),
         cls=config["meangs_class"],
         n=config["meangs_reads"],
         insert_size=config["insert_size"],
     log:
-        f"{OUT}/logs/meangs/{{sample}}.log",
+        f"{OUT}logs/meangs/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/meangs/{{sample}}.tsv"
+        f"{OUT}benchmarks/meangs/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/meangs.yaml"
@@ -53,15 +53,15 @@ rule getorganelle_mt:
         seed=mt_seed,
         db=GETORG_DB,
     output:
-        done=f"{OUT}/mito/{{sample}}/round0/.done",
+        done=f"{OUT}mito/{{sample}}/round0/.done",
     params:
         out=lambda w, output: str(Path(output.done).parent),
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
     log:
-        f"{OUT}/logs/getorganelle_mt/{{sample}}.log",
+        f"{OUT}logs/getorganelle_mt/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/getorganelle_mt/{{sample}}.tsv"
+        f"{OUT}benchmarks/getorganelle_mt/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -84,17 +84,17 @@ rule mt_iterate:
         round0=rules.getorganelle_mt.output.done,
         db=GETORG_DB,
     output:
-        fasta=f"{OUT}/mito/{{sample}}/{{sample}}.getorganelle.fasta",
-        status=f"{OUT}/mito/{{sample}}/{{sample}}.getorganelle.json",
+        fasta=f"{OUT}mito/{{sample}}/{{sample}}.getorganelle.fasta",
+        status=f"{OUT}mito/{{sample}}/{{sample}}.getorganelle.json",
     params:
         rounds=config["mt_iter_rounds"],
         R=config["mt_iter_R"],
         k=config["getorganelle_kmers"],
         max_gb=config["mt_iter_max_data_gb"],
     log:
-        f"{OUT}/logs/mt_iterate/{{sample}}.log",
+        f"{OUT}logs/mt_iterate/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/mt_iterate/{{sample}}.tsv"
+        f"{OUT}benchmarks/mt_iterate/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -107,10 +107,10 @@ rule mt_select:
     input:
         unpack(mt_select_inputs),
     output:
-        fasta=f"{OUT}/mito/{{sample}}/{{sample}}.mt.fasta",
-        status=f"{OUT}/mito/{{sample}}/{{sample}}.mt.json",
+        fasta=f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta",
+        status=f"{OUT}mito/{{sample}}/{{sample}}.mt.json",
     log:
-        f"{OUT}/logs/mt_select/{{sample}}.log",
+        f"{OUT}logs/mt_select/{{sample}}.log",
     threads: 8
     conda:
         "../envs/blast.yaml"
@@ -126,16 +126,16 @@ rule getorganelle_nr:
         seed=NR_SEED,
         label=NR_LABEL,
     output:
-        fasta=f"{OUT}/rdna/{{sample}}/{{sample}}.nr.fasta",
+        fasta=f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta",
     params:
         out=lambda w, output: str(Path(output.fasta).parent / "getorganelle"),
         collect=str(Path(workflow.basedir) / "scripts" / "collect_fasta.py"),
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
     log:
-        f"{OUT}/logs/getorganelle_nr/{{sample}}.log",
+        f"{OUT}logs/getorganelle_nr/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/getorganelle_nr/{{sample}}.tsv"
+        f"{OUT}benchmarks/getorganelle_nr/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"

@@ -6,16 +6,16 @@ rule spades:
         r2=rules.fastp.output.r2,
         json=rules.fastp.output.json,
     output:
-        scaffolds=f"{OUT}/assembly/{{sample}}/{{sample}}.scaffolds.fasta",
+        scaffolds=f"{OUT}assembly/{{sample}}/{{sample}}.scaffolds.fasta",
     params:
         out=lambda w, output: str(Path(output.scaffolds).parent / "spades"),
         min_gb=config["spades_min_clean_gb"],
     resources:
         mem_mb=spades_mem_mb,
     log:
-        f"{OUT}/logs/spades/{{sample}}.log",
+        f"{OUT}logs/spades/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/spades/{{sample}}.tsv"
+        f"{OUT}benchmarks/spades/{{sample}}.tsv"
     threads: 32
     conda:
         "../envs/spades.yaml"
@@ -43,7 +43,7 @@ rule busco_lineage:
     params:
         path=lambda w, output: str(Path(output[0]).parent.parent),
     log:
-        f"{OUT}/logs/busco_download/{{lineage}}.log",
+        f"{OUT}logs/busco_download/{{lineage}}.log",
     conda:
         "../envs/busco.yaml"
     shell:
@@ -55,13 +55,13 @@ rule busco:
         scaffolds=rules.spades.output.scaffolds,
         lineage=busco_lineage_dir,
     output:
-        summary=f"{OUT}/assembly/{{sample}}/{{sample}}.busco.txt",
+        summary=f"{OUT}assembly/{{sample}}/{{sample}}.busco.txt",
     params:
         out=lambda w, output: str(Path(output.summary).parent),
     log:
-        f"{OUT}/logs/busco/{{sample}}.log",
+        f"{OUT}logs/busco/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/busco/{{sample}}.tsv"
+        f"{OUT}benchmarks/busco/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/busco.yaml"

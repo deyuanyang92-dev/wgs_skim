@@ -7,14 +7,14 @@ rule topology:
         r2=rules.fastp.output.r2,
         annotation=lambda wc: rules.mitom_annotate.output.gb if config["annotate"] else [],
     output:
-        tsv=f"{OUT}/topology/{{sample}}/{{sample}}.topology.tsv",
+        tsv=f"{OUT}topology/{{sample}}/{{sample}}.topology.tsv",
     params:
         pairs=config["topology_pairs"],
         mode=TOPOLOGY,
     log:
-        f"{OUT}/logs/topology/{{sample}}.log",
+        f"{OUT}logs/topology/{{sample}}.log",
     benchmark:
-        f"{OUT}/benchmarks/topology/{{sample}}.tsv"
+        f"{OUT}benchmarks/topology/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/topology.yaml"

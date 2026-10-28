@@ -3,13 +3,13 @@ rule summary:
     input:
         unpack(summary_inputs),
     output:
-        tsv=f"{OUT}/summary/samples.tsv",
-        html=f"{OUT}/summary/report.html",
+        tsv=f"{OUT}summary/samples.tsv",
+        html=f"{OUT}summary/report.html",
     params:
         samples=list(SAMPLES),
         taxon=config["taxon"],
     log:
-        f"{OUT}/logs/summary.log",
+        f"{OUT}logs/summary.log",
     conda:
         "../envs/python.yaml"
     script:
