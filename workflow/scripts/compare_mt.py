@@ -396,14 +396,13 @@ def write_tables(out, prefix, summaries, diffs, structs, gene_rows):
 
 # Result layouts found by --results: paths relative to the results directory, {s} = sample. Every assembly found
 # for a sample is compared (absent ones are left out); the SPAdes graph belongs to the MitoFinder contigs only.
-# wgs_skim_pipeline (Temp_scripts): GetOrganelle 02.organelle/02_mt, MEANGS 02.organelle/01.MEANGS_results,
-# SPAdes 03.spades, MitoFinder 10.mitofinder.
+# wgs_skim_pipeline (Temp_scripts): GetOrganelle 02.organelle/02_mt, SPAdes 03.spades, MitoFinder 10.mitofinder.
+# MEANGS (02.organelle/01.MEANGS_results) is not compared: it only gives GetOrganelle its seed (user, 2026-10-28).
 LAYOUTS = {
     "wgs_skim_pipeline": {
         "samples": "02.organelle/02_mt/*",
         "ref": "02.organelle/02_mt/{s}",
-        "other": ["mitofinder=10.mitofinder/{s}/mitofinder/mitofinder_summary/mt_contigs/{s}_all_mt.fasta",
-                  "meangs=02.organelle/01.MEANGS_results/{s}/{s}_mg.fasta"],
+        "other": ["mitofinder=10.mitofinder/{s}/mitofinder/mitofinder_summary/mt_contigs/{s}_all_mt.fasta"],
         "spades": "03.spades/{s}",
         "graph_for": "mitofinder",
         "gb": "06.mito_annotation/final_annotation/{s}_locus_mt_1.gb",

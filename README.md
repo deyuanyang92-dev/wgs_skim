@@ -256,7 +256,7 @@ per comparison: lengths, topology, identity, blocks, verdict, GetOrganelle probl
 
 Structure and genes (QUAST-style, without QUAST): every contig of every assembly is also aligned locally to the
 reference with minimap2 and QUAST 5.2's own options (`-r 200`: any jump over 200 bp ends an alignment), so
-fragmented assemblies (MEANGS scaffolds), moved blocks and inversions are seen. Taken from QUAST's source:
+fragmented assemblies, moved blocks and inversions are seen. Taken from QUAST's source:
 misassembly classes between consecutive alignments of a contig (other strand = inversion; reference/contig distance
 mismatch > 1000 bp relocation, > 200 bp local), genome fraction, duplication ratio, unaligned length, complete /
 partial genes. Changed for mitogenomes: circular reference handled whole (doubled), genes judged on the bases present
@@ -274,7 +274,7 @@ listed as skipped), or a sample sheet for any other layout:
 
 ```bash
 wgs_skim compare --results results/ -o compare/ [--samples A,B] [-j 2]   # wgs_skim_pipeline layout: GetOrganelle
-                                     # 02.organelle/02_mt vs MitoFinder 10.mitofinder (+ SPAdes graph) and MEANGS
+                                     # 02.organelle/02_mt vs MitoFinder 10.mitofinder (+ SPAdes graph)
 wgs_skim compare --sheet samples.tsv -o compare/    # TSV: sample, ref, other ([label=]fasta,...), [spades, gb, gff, gfa]
 ```
 
@@ -285,7 +285,8 @@ differences and misassembly junctions red, GetOrganelle repeat regions purple, r
 assembly light red; hover for details. Plain SVG, no extra software (pyGenomeViz draws similar figures but needs a
 389 MB matplotlib / numpy / Biopython environment). `--no-plot` skips the figures.
 
-MJ20260820041, 3 samples x 2 assemblies, 3 at a time: 105 s, 7.2 GB peak memory (SPAdes graphs):
+MJ20260820041, 3 at a time: 105 s, 7.2 GB peak memory (SPAdes graphs). MEANGS rows are from a test of
+fragmented input only: MEANGS just gives GetOrganelle its seed and is not compared in batch mode.
 
 | sample | assembly | verdict | genome fraction | genes complete / partial / missing | notes |
 |---|---|---|---|---|---|
