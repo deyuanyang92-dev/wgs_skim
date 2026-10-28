@@ -49,7 +49,7 @@ insert_size: 350
 mt_iter_rounds: 3                # reseeded GetOrganelle rounds when the first assembly is not circular
 mt_iter_R: 20                    # GetOrganelle -R in reseeded rounds
 mt_iter_max_data_gb: 20          # reseeded rounds use all clean reads up to this many Gb (0 = no limit)
-mt_from_spades: true             # use the SPAdes scaffold when it closes the circle / is longer than GetOrganelle
+mt_from_spades: true             # use the SPAdes scaffold only when it closes the circle and GetOrganelle did not
 topology_pairs: 10000000         # read pairs used for the circular / linear check (0 = all)
 
 # ── 18S-28S rDNA ──────────────────────────────────────────────────────────────
