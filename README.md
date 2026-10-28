@@ -232,6 +232,28 @@ MJ20260820041, three individuals of one species, MitoFinder contigs on full-data
 Without the graph the end overlap gave CHY006 16,770 bp (58-bp overlap inside the repeat: 3 copies collapsed).
 Exact tandem copy numbers need long reads.
 
+**Comparing assemblies** (`wgs_skim compare`): are GetOrganelle and SPAdes-MitoFinder (or any other assembly) the
+same mitogenome? GetOrganelle is the reference because its graph shows where short reads cannot settle the
+sequence (segments used several times in the path or with several times the depth: tandem repeats, multi-copy
+regions). The other assembly is circularized first if needed (as above), turned to the same strand and start,
+aligned (MAFFT), and every difference is placed on a gene and a GetOrganelle-flagged region.
+
+```bash
+wgs_skim compare -a getorganelle_out/ -b mitofinder=<sample>_all_mt.fasta --spades spades_dir/ \
+                 --gb <sample>.gb -o compare/ --prefix <sample>      # -b can be repeated (label=fasta)
+```
+
+Verdict: **identical**; **consistent** — every difference is in a flagged repeat / gap, at the end of a linear
+reference, or a ≤ 2-bp homopolymer length difference; **differ** otherwise. Outputs `<sample>.compare.tsv` (one row
+per comparison: lengths, topology, identity, blocks, verdict, GetOrganelle problem regions), `<sample>.diffs.tsv`
+(each difference: position, type, gene, graph region) and the alignment. MJ20260820041 (~2 min per sample):
+
+| sample | GetOrganelle | MitoFinder after circularize | verdict | differences |
+|---|---|---|---|---|
+| CHY006 | 17,052 circular | 17,052 circular | identical | — |
+| CHY007 | 16,318 linear | 17,228 circular | consistent | 910 bp beyond the linear end (control region, after trnH) |
+| CHY008 | 17,050 circular | 17,048 circular | consistent | two 1-bp deletions in poly-T runs of 14 and 11 bp (control region) |
+
 ### Multi-copy nuclear markers
 
 `nuc_markers` (default on, needs the SPAdes assembly) annotates rDNA (18S, ITS1, 5.8S, ITS2, 28S) and histones

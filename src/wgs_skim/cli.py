@@ -7,6 +7,7 @@
     wgs_skim install                                  # create all software environments once
     wgs_skim samples -r rawdata                       # show detected sample names
     wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
+    wgs_skim compare -a getorganelle_dir -b mitofinder_mt.fasta --spades spades_dir   # are the assemblies the same?
     wgs_skim config > my.yaml                         # all options with comments
 
 Anything after `--` goes to snakemake unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
@@ -24,6 +25,17 @@ from . import __version__
 
 HOME = Path(os.environ.get("WGS_SKIM_HOME", Path.home() / ".wgs_skim"))
 USER_CONFIG = HOME / "config.yaml"
+
+
+def default_conda_prefix():
+    """WGS_SKIM_CONDA_PREFIX, else `conda_prefix:` in ~/.wgs_skim/config.yaml, else ~/.wgs_skim/conda."""
+    if os.environ.get("WGS_SKIM_CONDA_PREFIX"):
+        return os.environ["WGS_SKIM_CONDA_PREFIX"]
+    if USER_CONFIG.exists():
+        for line in USER_CONFIG.read_text().splitlines():
+            if line.startswith("conda_prefix:"):
+                return line.split(":", 1)[1].split("#")[0].strip()
+    return HOME / "conda"
 TAXA = ["annelid", "mollusc", "fish", "crustacean"]
 
 
@@ -112,6 +124,21 @@ def cmd_circularize(args, passthrough):
     return subprocess.run(cmd).returncode
 
 
+def cmd_compare(args, passthrough):
+    """GetOrganelle vs other mitogenome assemblies of one sample; see workflow/scripts/compare_mt.py."""
+    env = dict(os.environ)
+    if not shutil.which("mafft"):               # MAFFT from the workflow's own environments
+        found = sorted(Path(args.conda_prefix).glob("*/bin/mafft"))
+        if not found:
+            sys.exit("[wgs_skim] mafft not found: put it on PATH or run `wgs_skim install` first")
+        env["PATH"] = f"{found[0].parent}{os.pathsep}{env['PATH']}"
+    cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "compare_mt.py"), "-a", args.ref,
+           "-o", args.outdir, "--prefix", args.prefix]
+    cmd += [x for b in args.other for x in ("-b", b)]
+    cmd += [x for k in ("spades", "gb", "gfa") if getattr(args, k) for x in (f"--{k}", getattr(args, k))]
+    return subprocess.run(cmd, env=env).returncode
+
+
 def cmd_build_blastdb(args, passthrough):
     """Small marker BLAST database (one taxon, short records) from a local nt; see build_marker_db.py."""
     cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "build_marker_db.py"), "--nt", args.nt,
@@ -130,7 +157,7 @@ def main(argv=None):
     sub = p.add_subparsers(dest="command", required=True)
 
     def common(sp):
-        sp.add_argument("--conda-prefix", default=os.environ.get("WGS_SKIM_CONDA_PREFIX", HOME / "conda"),
+        sp.add_argument("--conda-prefix", default=default_conda_prefix(),
                         help="where software environments are kept, shared by all runs (default: %(default)s)")
         sp.add_argument("--configfile", help="YAML file with any workflow options (see `wgs_skim config`)")
         sp.add_argument("--config", nargs="+", metavar="KEY=VALUE", help="set workflow options, as in snakemake")
@@ -171,6 +198,18 @@ def main(argv=None):
     z.add_argument("--spades", help="SPAdes output directory: use its assembly graph (strongest check, fills gaps)")
     z.add_argument("--prefix", default="sample")
     z.set_defaults(func=cmd_circularize)
+
+    m = sub.add_parser("compare", help="compare GetOrganelle with SPAdes-MitoFinder (or other) mitogenomes")
+    m.add_argument("-a", "--ref", required=True, help="GetOrganelle output directory or FASTA (reference)")
+    m.add_argument("-b", "--other", action="append", required=True, help="[label=]FASTA to compare (repeatable)")
+    m.add_argument("--spades", help="SPAdes directory of the other assembly (graph-based circularization)")
+    m.add_argument("--gb", help="GenBank annotation of the reference (gene of each difference)")
+    m.add_argument("--gfa", help="reference assembly graph when -a is a FASTA")
+    m.add_argument("-o", "--outdir", default="compare")
+    m.add_argument("--prefix", default="sample")
+    m.add_argument("--conda-prefix", default=default_conda_prefix(),
+                   help="where `wgs_skim install` put the environments (MAFFT is taken from there)")
+    m.set_defaults(func=cmd_compare)
 
     b = sub.add_parser("build-blastdb", help="build a fast marker BLAST database (Metazoa, <= 50 kb) from local nt")
     b.add_argument("--nt", required=True, help="local nt prefix, e.g. /db/blast/nt")
