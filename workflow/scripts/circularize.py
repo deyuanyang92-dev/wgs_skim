@@ -3,13 +3,26 @@
 Why: MitoFinder and MitoHiFi decide circularity by a self-BLAST hit >= 220 bp within 40 bp of both ends
 (circularizationCheck.py, Schomaker 2014). Short-read assemblers leave an overlap of only ~k-1 bp, often with a few
 ragged bases (MJ20260820041 CHY006: 58 bp, of which the outer 24 bp disagree), so circular contigs are reported as
-"not found". Three checks, strongest first:
+"not found". Four checks, strongest first:
 
   graph    the contig's path in the SPAdes assembly graph (scaffolds.paths + assembly_graph_with_scaffolds.gfa)
            links its last segment back to its first: the molecule closes in the graph itself. The circle is the
            contig minus the link overlap. Segments used more than once in the path are tandem repeat units whose
            copy number the graph cannot resolve (CHY007: control-region unit used 4-5 times) - reported.
+  walk     the path end does not link to its start, but a short walk through the graph does (<= 12 segments,
+           each >= 0.2x the mt depth): the gap SPAdes left in a repeat region is filled from the graph. Of the walks found, the one with the highest
+           minimum depth is used; its segments and depths are reported. MitoFinder-trimmed contigs are accepted
+           when they lie inside the scaffold the path spells; the full scaffold is then circularized.
+           CHY008: 3 control-region segments (depth 404-601x, contig 998x) close a 17048 bp circle, identical
+           (99.99%, one 2-bp indel) to the circle GetOrganelle assembled and reads confirmed.
+           Tandem repeats: a segment whose depth says it occurs more often than the path uses it gets the missing
+           turns of its loop (copies = round(segment depth / depth of the contig's longest segment)). CHY006: a
+           94-bp control-region unit at 2500x vs 858x -> 2 more turns -> 17052 bp, identical (100%) to GetOrganelle.
+           Copy numbers that disagree with depth are reported ("repeat copies uncertain"): CHY007's scaffold uses
+           a unit 4-5 times at ~1.0-1.2x depth (17228 bp). Short reads cannot count tandem copies exactly.
   overlap  the ends overlap (k-mer vote + longest agreeing stretch >= 25 bp, ragged ends tolerated; seqtools).
+           Tried after the graph: an overlap inside a tandem repeat collapses repeat copies (CHY006: 58-bp overlap
+           gave 16770 bp; the walk and GetOrganelle 17052 bp).
   join     several contigs (MitoFinder often returns pieces): joined end to end through graph links or exact
            end overlaps (>= 20 bp); circular if the chain closes.
 
@@ -70,6 +83,82 @@ def read_links(gfa, segs):
                     links[(b, FLIP[bo], a, FLIP[ao])] = ov
     return length, links
 
+
+def read_graph(gfa):
+    """Whole graph: ({(segment, orientation): [(next, orientation, overlap)]}, {segment: depth}). ~1 min and ~6 GB
+    for a 2.5 GB GFA (9 M links); read only when a contig needs a walk."""
+    adj, depth = {}, {}
+    with open(gfa) as fh:
+        for line in fh:
+            if line[0] == "L":
+                _, a, ao, b, bo, cig = line.rstrip("\n").split("\t")[:6]
+                ov = int(re.match(r"(\d+)", cig).group(1)) if cig[0].isdigit() else 0
+                adj.setdefault((a, ao), []).append((b, bo, ov))
+                adj.setdefault((b, FLIP[bo]), []).append((a, FLIP[ao], ov))
+            elif line[0] == "S":
+                t = line.split("\t", 2)
+                m = re.search(r"\tDP:f:([\d.eE+-]+)", t[2])
+                depth[t[1]] = float(m.group(1)) if m else 0.0
+    return adj, depth
+
+
+def read_sequences(gfa, names):
+    with open(gfa) as fh:
+        return {t[1]: t[2] for t in (line.split("\t", 3) for line in fh if line[0] == "S") if t[1] in names}
+
+
+def walks(adj, ok, start, goal, max_steps=12, budget=200000):
+    """Paths start -> ... -> goal through segments ok() accepts, without revisits: [[(seg, ori), ...]] (start and
+    goal excluded)."""
+    found, todo = [], [[start]]
+    while todo and budget:
+        budget -= 1
+        p = todo.pop()
+        for b, bo, _ in adj.get(p[-1], []):
+            if (b, bo) == goal:
+                found.append(p[1:])
+            elif len(p) <= max_steps and ok(b) and (b, bo) not in p:
+                todo.append(p + [(b, bo)])
+    return found
+
+
+def add_repeat_copies(circ, adj, copies):
+    """Tandem repeats: a segment used fewer times in the circle than its depth says (copies(s) = round(depth / mt))
+    gets the missing turns of its loop inserted (a loop through segments that all miss copies). Returns
+    (circle, note)."""
+    notes = []
+    for _ in range(20):
+        used = {}
+        for s, _o in circ:
+            used[s] = used.get(s, 0) + 1
+
+        def miss(s, used=used):
+            return copies(s) - used.get(s, 0)
+
+        for i, x in enumerate(circ):
+            if miss(x[0]) > 0:
+                loops = walks(adj, lambda s, x=x, miss=miss: miss(s) > 0 and s != x[0], x, x, max_steps=10)
+                if loops:
+                    loop = min(loops, key=len)
+                    n = min(miss(s) for s, _ in loop + [x])
+                    circ = circ[:i + 1] + (loop + [x]) * n + circ[i + 1:]
+                    notes.append(f"repeat unit {'-'.join(s for s, _ in [x] + loop)} +{n} copies (depth)")
+                    break
+        else:
+            break
+    return circ, "; ".join(notes)
+
+
+def path_sequence(circ, seq, adj, circular=True):
+    """Sequence of a segment path; circular: each segment minus its overlap with the one before (wrapping)."""
+    def part(s, o):
+        return seq[s] if o == "+" else rc(seq[s])
+    ov = {(a, ao, b, bo): o for a, ao in set(circ) for b, bo, o in adj.get((a, ao), [])}
+    out = [] if circular else [part(*circ[0])]
+    for k in range(0 if circular else 1, len(circ)):
+        (a, ao), (b, bo) = circ[k - 1], circ[k]
+        out.append(part(b, bo)[ov[(a, ao, b, bo)]:])
+    return "".join(out)
 
 def graph_check(path, links, length):
     """(closes, overlap, repeat note, branch note) for one contig path."""
@@ -132,7 +221,7 @@ def circularize(recs, spades=None):
         paths = read_paths(Path(spades, "scaffolds.paths"), set(seqs))
         segs = {s for p in paths.values() for c in p for s, _ in c}
         length, links = read_links(Path(spades, "assembly_graph_with_scaffolds.gfa"), segs)
-    rows, out = [], []
+    rows, out, unclosed = [], [], {}
     for cid, s in seqs.items():
         row = dict(contig=cid, length=len(s), method="not_circular", circle_length="", overlap_bp="",
                    gaps=s.upper().count("N"), repeats="", branches="", note="")
@@ -145,15 +234,51 @@ def circularize(recs, spades=None):
             if closes and (ov == 0 or s[-ov:] == s[:ov]):
                 circle = s[:len(s) - ov]
                 row.update(method="graph", overlap_bp=ov)
-        if circle is None:
-            c = find_circle(s)
-            if c:
-                circle = s[c["anchor"]:c["anchor"] + c["P"]]
-                row.update(method="overlap", overlap_bp=c["overlap"])
+        if circle is None and cid in paths:
+            unclosed[cid] = len(rows)
         if circle is not None:
             row["circle_length"] = len(circle)
         rows.append(row)
         out.append((cid, circle or s))
+    if unclosed:                                 # graph walk from each open end back to the start
+        gfa = Path(spades, "assembly_graph_with_scaffolds.gfa")
+        adj, depth = read_graph(gfa)
+        for cid, i in unclosed.items():
+            flat = [x for c in paths[cid] for x in c]
+            mt = depth[max(flat, key=lambda x: length.get(x[0], 0))[0]]   # depth of the contig's longest segment
+            ws = walks(adj, lambda s, mt=mt: depth.get(s, 0) >= 0.2 * mt, flat[-1], flat[0])
+            if not ws:
+                rows[i]["note"] = "; ".join(x for x in (rows[i]["note"], "no mt-depth graph walk closes the ends") if x)
+                continue
+            best = max(ws, key=lambda w: (min((depth[s] for s, _ in w), default=float("inf")), -len(w)))
+            circ, rep = add_repeat_copies(flat + best, adj, lambda s, mt=mt: round(depth.get(s, 0) / mt))
+            seq = read_sequences(gfa, {s for s, _ in circ})
+            if seqs[cid] not in path_sequence(flat, seq, adj, circular=False):   # MitoFinder may trim the scaffold
+                rows[i]["note"] = "; ".join(x for x in (rows[i]["note"], "graph path does not rebuild the contig") if x)
+                continue
+            circle = path_sequence(circ, seq, adj)
+            used = {}
+            for x, _ in circ:
+                used[x] = used.get(x, 0) + 1
+            odd = [f"{x} x{n} in circle, depth ~x{depth[x] / mt:.1f}" for x, n in used.items()
+                   if max(n, round(depth[x] / mt)) > 1 and n != round(depth[x] / mt)]
+            if odd:                              # short reads cannot count tandem copies exactly: say so
+                rep = "; ".join(x for x in (rep, "repeat copies uncertain: " + ", ".join(odd)) if x)
+            filled = ", ".join(f"{s}{o} ({len(seq[s])} bp, {depth[s]:.0f}x)" for s, o in best)
+            rows[i].update(method="walk", circle_length=len(circle), overlap_bp="",
+                           note="; ".join(x for x in (f"gap filled from the graph: {filled or 'direct link'} "
+                                                      f"(mt depth {mt:.0f}x, {len(ws)} walk(s))", rep) if x))
+            out[i] = (cid, circle)
+        del adj, depth
+
+    for i, row in enumerate(rows):               # no graph (or no walk): overlapping ends
+        if row["method"] == "not_circular":
+            s = seqs[row["contig"]]
+            c = find_circle(s)
+            if c:
+                circle = s[c["anchor"]:c["anchor"] + c["P"]]
+                row.update(method="overlap", overlap_bp=c["overlap"], circle_length=len(circle))
+                out[i] = (row["contig"], circle)
     if len(recs) > 1 and not any(r["method"] != "not_circular" for r in rows):
         joined = try_join(seqs, links, paths)
         if joined:

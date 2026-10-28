@@ -207,15 +207,30 @@ assembly almost always means an unfinished control region (see `end_diagnosis`).
 **Circularization without reads** (`wgs_skim circularize`, also used inside the workflow for SPAdes): MitoFinder and
 MitoHiFi accept a circle only for a self-BLAST overlap >= 220 bp within 40 bp of both ends, but short-read assemblers
 leave ~k-1 bp, often with ragged ends — circular contigs are then reported as "not found". `circularize` checks, in
-order: the contig's path closing in the SPAdes assembly graph (also reports tandem repeat units whose copy number
-the graph cannot resolve), an end overlap >= 25 bp tolerant of ragged ends, and several pieces joined end to end.
+order:
+
+1. **graph** — the contig's path in the SPAdes assembly graph links its end back to its start;
+2. **walk** — otherwise a short walk through the graph (≤ 12 segments, each at mt-level depth) closes the gap
+   SPAdes left, usually in the control region. Tandem repeat units get the copy number their depth implies
+   (segment depth / mt depth); copy numbers the path and depth disagree on are reported as uncertain;
+3. **overlap** — no graph: an end overlap ≥ 25 bp tolerant of ragged ends (after the graph, because an overlap
+   inside a tandem repeat collapses copies);
+4. **join** — several pieces joined end to end.
 
 ```bash
 wgs_skim circularize -i mitofinder/<sample>_all_mt.fasta --spades spades_dir/ -o circ/ --prefix <sample>
 ```
 
-On MJ20260820041: CHY006 (MitoFinder "not found") -> circular 16,770 bp (58 bp overlap); CHY007 -> circular, with a
-control-region repeat (129 + 119 bp unit used 4-5 times in the graph path).
+MJ20260820041, three individuals of one species, MitoFinder contigs on full-data SPAdes (~2 min, ~7 GB RAM each):
+
+| sample | MitoFinder | circularize | vs. GetOrganelle (reads) |
+|---|---|---|---|
+| CHY006 | not found | walk, 9 segments + 2 turns of a 94-bp repeat (2500x vs 858x): 17,052 bp | identical (100%) |
+| CHY007 | trimmed 17,040 of a 17,305 bp scaffold | scaffold closes: 17,228 bp; repeat unit used 4-5x at ~1x depth: copies uncertain | GetOrganelle only linear 16,392 bp |
+| CHY008 | circular with a gap | walk, 3 segments (404-601x): 17,048 bp | 99.99% (one 2-bp indel) |
+
+Without the graph the end overlap gave CHY006 16,770 bp (58-bp overlap inside the repeat: 3 copies collapsed).
+Exact tandem copy numbers need long reads.
 
 ### Multi-copy nuclear markers
 
