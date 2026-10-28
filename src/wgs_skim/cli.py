@@ -8,6 +8,7 @@
     wgs_skim samples -r rawdata                       # show detected sample names
     wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
     wgs_skim compare -a getorganelle_dir -b mitofinder_mt.fasta --spades spades_dir   # are the assemblies the same?
+    wgs_skim compare --results results/ -o compare/                              # every sample at once
     wgs_skim config > my.yaml                         # all options with comments
 
 Anything after `--` goes to snakemake unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
@@ -125,17 +126,19 @@ def cmd_circularize(args, passthrough):
 
 
 def cmd_compare(args, passthrough):
-    """GetOrganelle vs other mitogenome assemblies of one sample; see workflow/scripts/compare_mt.py."""
+    """GetOrganelle vs other mitogenome assemblies, one sample or a batch; see workflow/scripts/compare_mt.py."""
     env = dict(os.environ)
     if not shutil.which("mafft"):               # MAFFT from the workflow's own environments
         found = sorted(Path(args.conda_prefix).glob("*/bin/mafft"))
         if not found:
             sys.exit("[wgs_skim] mafft not found: put it on PATH or run `wgs_skim install` first")
         env["PATH"] = f"{found[0].parent}{os.pathsep}{env['PATH']}"
-    cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "compare_mt.py"), "-a", args.ref,
-           "-o", args.outdir, "--prefix", args.prefix]
-    cmd += [x for b in args.other for x in ("-b", b)]
-    cmd += [x for k in ("spades", "gb", "gfa") if getattr(args, k) for x in (f"--{k}", getattr(args, k))]
+    cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "compare_mt.py"),
+           "-o", args.outdir, "--prefix", args.prefix, "-j", str(args.jobs)]
+    cmd += [x for b in args.other or [] for x in ("-b", b)]
+    cmd += ["--no-plot"] if args.no_plot else []
+    cmd += [x for k in ("ref", "spades", "gb", "gfa", "results", "sheet", "samples") if getattr(args, k)
+            for x in (f"--{k}", getattr(args, k))]
     return subprocess.run(cmd, env=env).returncode
 
 
@@ -200,11 +203,16 @@ def main(argv=None):
     z.set_defaults(func=cmd_circularize)
 
     m = sub.add_parser("compare", help="compare GetOrganelle with SPAdes-MitoFinder (or other) mitogenomes")
-    m.add_argument("-a", "--ref", required=True, help="GetOrganelle output directory or FASTA (reference)")
-    m.add_argument("-b", "--other", action="append", required=True, help="[label=]FASTA to compare (repeatable)")
+    m.add_argument("-a", "--ref", help="GetOrganelle output directory or FASTA (reference)")
+    m.add_argument("-b", "--other", action="append", help="[label=]FASTA to compare (repeatable)")
     m.add_argument("--spades", help="SPAdes directory of the other assembly (graph-based circularization)")
     m.add_argument("--gb", help="GenBank annotation of the reference (gene of each difference)")
     m.add_argument("--gfa", help="reference assembly graph when -a is a FASTA")
+    m.add_argument("--results", help="batch: results directory (all samples with GetOrganelle + MitoFinder)")
+    m.add_argument("--sheet", help="batch: sample sheet TSV with sample, ref, other, [spades, gb, gfa]")
+    m.add_argument("--samples", help="batch: only these samples (comma-separated)")
+    m.add_argument("-j", "--jobs", type=int, default=2, help="batch: samples at a time (~7 GB memory each)")
+    m.add_argument("--no-plot", action="store_true", help="no figures (default: one SVG per comparison)")
     m.add_argument("-o", "--outdir", default="compare")
     m.add_argument("--prefix", default="sample")
     m.add_argument("--conda-prefix", default=default_conda_prefix(),

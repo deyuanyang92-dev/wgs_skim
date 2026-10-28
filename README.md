@@ -254,6 +254,21 @@ per comparison: lengths, topology, identity, blocks, verdict, GetOrganelle probl
 | CHY007 | 16,318 linear | 17,228 circular | consistent | 910 bp beyond the linear end (control region, after trnH) |
 | CHY008 | 17,050 circular | 17,048 circular | consistent | two 1-bp deletions in poly-T runs of 14 and 11 bp (control region) |
 
+Batch: every sample of a results directory at once (samples missing a result are listed as skipped), or a sample
+sheet for any other layout:
+
+```bash
+wgs_skim compare --results results/ -o compare/ [--samples A,B] [-j 2]   # wgs_skim_pipeline layout (02.organelle,
+                                                                          # 03.spades, 06.mito_annotation, 10.mitofinder)
+wgs_skim compare --sheet samples.tsv -o compare/    # TSV: sample, ref, other ([label=]fasta,...), [spades, gb, gfa]
+```
+
+-> `compare/all.compare.tsv`, `all.diffs.tsv` and `all.compare.html` (table + every figure). Each comparison also
+gets `<sample>.<label>.compare.svg`: genes of the reference annotation drawn on both assemblies (carried over through
+the alignment), alignment links, differences red, GetOrganelle repeat regions purple; hover for details. Plain SVG,
+no extra software (pyGenomeViz draws the same but needs a 389 MB matplotlib / numpy / Biopython environment).
+Three CHY samples, 3 at a time: 155 s, 7.2 GB peak memory (SPAdes graphs). `--no-plot` skips the figures.
+
 ### Multi-copy nuclear markers
 
 `nuc_markers` (default on, needs the SPAdes assembly) annotates rDNA (18S, ITS1, 5.8S, ITS2, 28S) and histones

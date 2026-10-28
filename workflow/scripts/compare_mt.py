@@ -16,6 +16,12 @@ Verdict: identical | consistent (every difference is inside a flagged repeat / g
 Usage: compare_mt.py -a getorganelle_out_dir_or_fasta -b mitofinder_mt.fasta [-b label=other.fasta]
                      [--spades spades_dir] [--gb reference.gb] [--gfa reference_graph.gfa] -o out/ --prefix sample
        -> out/<prefix>.compare.tsv (one row per comparison), <prefix>.diffs.tsv, <prefix>.<label>.aligned.fasta
+Batch:  compare_mt.py --results results_dir [--samples A,B] [-j 2] -o out/    (layouts in LAYOUTS)
+        compare_mt.py --sheet samples.tsv -o out/       (columns sample, ref, other, [spades, gb, gfa])
+       -> per-sample files as above, plus out/all.compare.tsv and out/all.diffs.tsv (skipped / error rows included)
+Figures (plot_compare.py, plain SVG): <prefix>.<label>.compare.svg per comparison - genes of the reference
+annotation on both assemblies, alignment links, differences red, GetOrganelle repeat regions purple; batch also
+writes out/all.compare.html (table + every figure). --no-plot to skip.
 Needs mafft on PATH.
 """
 import argparse
@@ -28,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from circularize import circularize, rc  # noqa: E402
+from plot_compare import draw  # noqa: E402
 from seqtools import read_fasta, write_fasta  # noqa: E402
 
 
@@ -89,7 +96,7 @@ def graph_regions(header, gfa, ref):
 
 
 def genes(gb, ref):
-    """[(start, end, name)] 0-based on ref from a GenBank file (gene / CDS / tRNA / rRNA / D-loop / misc_feature);
+    """[(start, end, name, strand, type)] 0-based on ref from a GenBank file (gene / CDS / tRNA / rRNA / D-loop / misc_feature);
     the annotated sequence may start elsewhere on the circle (shifted) but must be on the same strand."""
     out, cur, origin = [], None, []
     lines = open(gb).read().split("\n")
@@ -107,13 +114,18 @@ def genes(gb, ref):
             if m.group(1) in ("gene", "CDS", "tRNA", "rRNA", "D-loop", "misc_feature", "rep_origin"):
                 pos = [int(x) for x in re.findall(r"\d+", m.group(2))]
                 if pos:
-                    cur = [min(pos) - 1, max(pos), m.group(1)]
+                    cur = [min(pos) - 1, max(pos), m.group(1), -1 if "complement" in m.group(2) else 1, m.group(1)]
                     out.append(cur)
         elif cur and re.search(r'/(gene|product|note)="', line) and cur[2] in ("gene", "CDS", "tRNA", "rRNA", "D-loop",
                                                                            "misc_feature", "rep_origin"):
             cur[2] = re.search(r'="([^"]*)', line).group(1)
     n = len(gseq) or len(ref)
-    return [((a - shift) % n, (a - shift) % n + b - a, name) for a, b, name in out]
+    seen, res = set(), []
+    for a, b, name, strand, typ in out:              # gene + CDS of the same gene: keep the first
+        if (a, b) not in seen:
+            seen.add((a, b))
+            res.append(((a - shift) % n, (a - shift) % n + b - a, name, strand, typ))
+    return res
 
 
 def orient(ref, seq, circular=True, k=31):
@@ -205,7 +217,7 @@ def compare(ref, ref_circular, regions, feats, label, other, other_circular, met
         end = not ref_circular and (s == 0 or e >= n)
         if hit or end:
             explained += 1
-        g = sorted({name for gs, ge, name in feats if gs <= e and ge >= s})
+        g = sorted({f[2] for f in feats if f[0] <= e and f[1] >= s})
         if feats and not g:                          # intergenic: name the flanking genes
             before = max((f for f in feats if f[1] <= s), key=lambda f: f[1], default=None)
             after = min((f for f in feats if f[0] > e), key=lambda f: f[0], default=None)
@@ -232,32 +244,27 @@ DIFFS = ["sample", "other", "ref_start", "ref_end", "type", "ref_bp", "other_bp"
          "other_seq"]
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-a", "--ref", required=True, help="GetOrganelle output directory or FASTA (reference)")
-    ap.add_argument("-b", "--other", action="append", required=True, help="[label=]FASTA to compare (repeatable)")
-    ap.add_argument("--spades", help="SPAdes directory of the other assembly (graph-based circularization)")
-    ap.add_argument("--gb", help="GenBank annotation of the reference (genes for each difference)")
-    ap.add_argument("--gfa", help="reference assembly graph, if -a is a FASTA")
-    ap.add_argument("-o", "--outdir", required=True)
-    ap.add_argument("--prefix", default="sample")
-    a = ap.parse_args()
-    out = Path(a.outdir)
+def compare_sample(ref_path, others, out, prefix, spades=None, gb=None, gfa=None, plot=True):
+    """Compare one sample's assemblies with its GetOrganelle result; writes the per-sample files.
+    Returns (summary rows, difference rows, printed lines)."""
     out.mkdir(parents=True, exist_ok=True)
-
-    fasta, gfa, alts = getorganelle_result(a.ref)
+    fasta, ref_gfa, alts = getorganelle_result(ref_path)
     (header, ref), = read_fasta(fasta)[:1]
     ref_circ = "circular" in header and "linear" not in header
-    regions = graph_regions(header, a.gfa or gfa, ref)
-    feats = genes(a.gb, ref) if a.gb else []
-    summaries, diffs = [], []
-    for item in a.other:
+    regions = graph_regions(header, gfa or ref_gfa, ref)
+    feats = genes(gb, ref) if gb else []
+    with open(out / f"{prefix}.genes.tsv", "w") as fh:          # for the figure
+        fh.write("start\tend\tname\tstrand\ttype\n" + "".join("\t".join(map(str, f)) + "\n" for f in feats))
+    with open(out / f"{prefix}.regions.tsv", "w") as fh:
+        fh.write("start\tend\tlabel\n" + "".join(f"{x}\t{y}\t{lab}\n" for x, y, lab in regions))
+    summaries, diffs, lines = [], [], []
+    for item in others:
         label, path = item.split("=", 1) if "=" in item and not Path(item).exists() else (Path(item).stem, item)
         recs = read_fasta(path)
         if any("circular" in n and "linear" not in n for n, _ in recs) and len(recs) == 1:
             seq, circ, method = recs[0][1], True, "as given (circular)"
         else:
-            rows, seqs = circularize(recs, a.spades)
+            rows, seqs = circularize(recs, spades)
             done = [(r, s) for r, (_, s) in zip(rows, seqs) if r["method"] != "not_circular"]
             if rows and rows[-1]["method"] == "join":
                 done = [(rows[-1], seqs[0][1])]
@@ -266,27 +273,188 @@ def main():
                 circ, method = True, f"circularized: {r['method']} ({r['note'] or r['contig']})"[:300]
             else:
                 seq, circ, method = max((s for _, s in recs), key=len), False, "not circular (longest contig)"
-        with open(out / f"{a.prefix}.{label}.oriented.fasta", "w") as fh:
-            write_fasta([(f"{a.prefix}|{label} {'circular' if circ else 'linear'}", orient(ref, seq, circ)[0])], fh)
+        with open(out / f"{prefix}.{label}.oriented.fasta", "w") as fh:
+            write_fasta([(f"{prefix}|{label} {'circular' if circ else 'linear'}", orient(ref, seq, circ)[0])], fh)
         s, rows, aln = compare(ref, ref_circ, regions, feats, label, seq, circ, method)
-        s.update(sample=a.prefix, ref_alternative_paths=alts,
+        s.update(sample=prefix, ref_alternative_paths=alts,
                  ref_problem_regions="; ".join(f"{x + 1}-{y}: {lab}" for x, y, lab in regions))
         summaries.append(s)
-        diffs += [{"sample": a.prefix, **r} for r in rows]
+        diffs += [{"sample": prefix, **r} for r in rows]
         if aln:
-            with open(out / f"{a.prefix}.{label}.aligned.fasta", "w") as fh:
-                write_fasta([(f"{a.prefix}|getorganelle", aln[0]), (f"{a.prefix}|{label}", aln[1])], fh)
-        print(f"{a.prefix} getorganelle {len(ref)} bp vs {label} {len(seq)} bp: {s['verdict']} "
-              f"(identity {s.get('identity_pct')}%, {s.get('diff_blocks')} difference block(s), "
-              f"{s.get('unexplained_blocks')} outside GetOrganelle-flagged regions)")
-        for r in rows:
-            print(f"  {r['ref_start']}-{r['ref_end']} {r['type']} {r['ref_bp']}->{r['other_bp']} bp  {r['gene']}  "
-                  f"{r['graph_region'] or '-'}")
+            with open(out / f"{prefix}.{label}.aligned.fasta", "w") as fh:
+                write_fasta([(f"{prefix}|getorganelle", aln[0]), (f"{prefix}|{label}", aln[1])], fh)
+        lines.append(f"{prefix} getorganelle {len(ref)} bp vs {label} {len(seq)} bp: {s['verdict']} "
+                     f"(identity {s.get('identity_pct')}%, {s.get('diff_blocks')} difference block(s), "
+                     f"{s.get('unexplained_blocks')} outside GetOrganelle-flagged regions)")
+        lines += [f"  {r['ref_start']}-{r['ref_end']} {r['type']} {r['ref_bp']}->{r['other_bp']} bp  {r['gene']}  "
+                  f"{r['graph_region'] or '-'}" for r in rows]
+    write_tables(out, prefix, summaries, diffs)
+    if plot:
+        for r in summaries:
+            if (out / f"{prefix}.{r['other']}.aligned.fasta").exists():
+                lines.append(figure(out, prefix, r, feats, regions, diffs))
+    return summaries, diffs, lines
+
+
+def figure(out, prefix, row, feats, regions, diffs):
+    """SVG of one comparison (plot_compare.draw) -> <prefix>.<label>.compare.svg."""
+    base = out / f"{prefix}.{row['other']}"
+    aligned = [s for _, s in read_fasta(f"{base}.aligned.fasta")][:2]
+    svg = draw(aligned, feats, regions, [d for d in diffs if d["other"] == row["other"]], row["other"],
+               f"{prefix}: {row['verdict']} (identity {row.get('identity_pct')}%)")
+    (out / f"{base.name}.compare.svg").write_text(svg)
+    return f"  figure: {base}.compare.svg"
+
+
+def write_tables(out, prefix, summaries, diffs):
     for name, fields, data in (("compare", SUMMARY, summaries), ("diffs", DIFFS, diffs)):
-        with open(out / f"{a.prefix}.{name}.tsv", "w", newline="") as fh:
+        with open(out / f"{prefix}.{name}.tsv", "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t", extrasaction="ignore", restval="")
             w.writeheader()
             w.writerows(data)
+
+
+# Result layouts found by --results: paths relative to the results directory, {s} = sample.
+# wgs_skim_pipeline (Temp_scripts): GetOrganelle 02.organelle/02_mt, SPAdes 03.spades, MitoFinder 10.mitofinder.
+LAYOUTS = {
+    "wgs_skim_pipeline": {
+        "samples": "02.organelle/02_mt/*",
+        "ref": "02.organelle/02_mt/{s}",
+        "other": ["mitofinder=10.mitofinder/{s}/mitofinder/mitofinder_summary/mt_contigs/{s}_all_mt.fasta"],
+        "spades": "03.spades/{s}",
+        "gb": "06.mito_annotation/final_annotation/{s}_locus_mt_1.gb",
+    },
+}
+
+
+def jobs_from_results(results):
+    """One job per sample found in a results directory of a known layout."""
+    res = Path(results)
+    for name, lay in LAYOUTS.items():
+        dirs = sorted(d for d in res.glob(lay["samples"]) if d.is_dir())
+        if not dirs:
+            continue
+        print(f"[compare] {res}: layout {name}, {len(dirs)} sample(s)", file=sys.stderr)
+        jobs = []
+        for d in dirs:
+            s = d.name
+            f = lambda t: str(res / t.format(s=s))  # noqa: E731
+            jobs.append({"sample": s, "ref": f(lay["ref"]), "spades": f(lay["spades"]), "gb": f(lay["gb"]),
+                         "other": [o.split("=", 1)[0] + "=" + f(o.split("=", 1)[1]) for o in lay["other"]]})
+        return jobs
+    sys.exit(f"[compare] {res}: no known result layout ({', '.join(LAYOUTS)}); use --sheet")
+
+
+def jobs_from_sheet(sheet):
+    """Sample sheet (TSV): sample, ref, other ([label=]fasta, several separated by ','), optional spades, gb, gfa."""
+    jobs = []
+    with open(sheet) as fh:
+        for row in csv.DictReader((x for x in fh if x.strip() and not x.startswith("#")), delimiter="\t"):
+            jobs.append({"sample": row["sample"], "ref": row["ref"], "other": row["other"].split(","),
+                         **{k: row.get(k) or None for k in ("spades", "gb", "gfa")}})
+    return jobs
+
+
+def missing_inputs(job):
+    """Why a job cannot run (required files absent); optional files that are absent are dropped."""
+    for k in ("spades", "gb", "gfa"):
+        if job.get(k) and not Path(job[k]).exists():
+            job[k] = None
+    miss = [] if Path(job["ref"]).exists() else ["GetOrganelle result"]
+    miss += [o.split("=", 1)[0] for o in job["other"] if not Path(o.split("=", 1)[-1]).exists()]
+    return miss
+
+
+def run_job(job, out):
+    try:
+        s, d, lines = compare_sample(job["ref"], job["other"], out, job["sample"], job.get("spades"), job.get("gb"),
+                                     job.get("gfa"), job.get("plot", True))
+        return s, d, lines
+    except Exception as e:  # one sample failing must not stop the batch; reported in the table
+        return [{"sample": job["sample"], "verdict": "error", "note": f"{type(e).__name__}: {e}"[:300]}], [], \
+            [f"{job['sample']}: error: {type(e).__name__}: {e}"]
+
+
+def batch(jobs, out, threads, only=None, plot=True):
+    """All samples, `threads` at a time; per-sample files plus all.compare.tsv / all.diffs.tsv."""
+    from concurrent.futures import ProcessPoolExecutor
+    if only:
+        keep = set(only.split(","))
+        jobs = [j for j in jobs if j["sample"] in keep]
+    summaries, diffs, todo = [], [], []
+    for j in jobs:
+        j["plot"] = plot
+        miss = missing_inputs(j)
+        if miss:
+            summaries.append({"sample": j["sample"], "verdict": "skipped", "note": "missing: " + ", ".join(miss)})
+            print(f"{j['sample']}: skipped (missing: {', '.join(miss)})")
+        else:
+            todo.append(j)
+    with ProcessPoolExecutor(max_workers=max(1, threads)) as ex:
+        for s, d, lines in ex.map(run_job, todo, [out] * len(todo)):
+            summaries += s
+            diffs += d
+            print("\n".join(lines), flush=True)
+    order = {j["sample"]: i for i, j in enumerate(jobs)}
+    summaries.sort(key=lambda r: order.get(r["sample"], 0))
+    diffs.sort(key=lambda r: order.get(r["sample"], 0))
+    write_tables(out, "all", summaries, diffs)
+    overview(out, summaries)
+    n = {}
+    for r in summaries:
+        n[r["verdict"]] = n.get(r["verdict"], 0) + 1
+    print(f"[compare] {len(jobs)} sample(s): " + ", ".join(f"{k} {v}" for k, v in n.items())
+          + f" -> {out / 'all.compare.tsv'}, {out / 'all.diffs.tsv'}, {out / 'all.compare.html'}")
+
+
+def overview(out, summaries):
+    """One page: summary table, then each sample's figure (inline SVG)."""
+    from html import escape
+    cols = ["sample", "other", "ref_length", "other_length", "ref_topology", "other_topology", "identity_pct",
+            "diff_blocks", "unexplained_blocks", "verdict", "note"]
+    color = {"identical": "#2e7d32", "consistent": "#1565c0", "differ": "#c62828"}
+    rows = "".join("<tr>" + "".join(
+        f'<td style="color:{color.get(r.get(c), "inherit")}">{escape(str(r.get(c, "")))}</td>' for c in cols)
+        + "</tr>" for r in summaries)
+    figs = ""
+    for r in summaries:
+        f = out / f"{r['sample']}.{r.get('other', '')}.compare.svg"
+        if r.get("other") and f.exists():
+            figs += f'<h3>{escape(r["sample"])} - {escape(r["other"])}</h3>' + f.read_text()
+    (out / "all.compare.html").write_text(
+        '<!doctype html><meta charset="utf-8"><title>Assembly comparison</title><style>body{font-family:Arial,'
+        'sans-serif;margin:20px}table{border-collapse:collapse;font-size:13px}td,th{border:1px solid #ccc;'
+        'padding:3px 8px}svg{max-width:100%;height:auto}</style><h2>GetOrganelle vs other assemblies</h2>'
+        '<p>identical: no difference; consistent: every difference is in a GetOrganelle repeat region, at a linear '
+        'end or a homopolymer length; differ: check by hand. Hover the figures for details.</p>'
+        f'<table><tr>{"".join(f"<th>{c}</th>" for c in cols)}</tr>{rows}</table>{figs}')
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-a", "--ref", help="GetOrganelle output directory or FASTA (reference)")
+    ap.add_argument("-b", "--other", action="append", help="[label=]FASTA to compare (repeatable)")
+    ap.add_argument("--spades", help="SPAdes directory of the other assembly (graph-based circularization)")
+    ap.add_argument("--gb", help="GenBank annotation of the reference (genes for each difference)")
+    ap.add_argument("--gfa", help="reference assembly graph, if -a is a FASTA")
+    ap.add_argument("--results", help="batch: results directory of a known layout (all samples found there)")
+    ap.add_argument("--sheet", help="batch: sample sheet TSV (sample, ref, other, [spades, gb, gfa])")
+    ap.add_argument("--samples", help="batch: only these samples (comma-separated)")
+    ap.add_argument("-j", "--jobs", type=int, default=2,
+                    help="batch: samples at a time (each needs ~7 GB memory with --spades graphs; default 2)")
+    ap.add_argument("--no-plot", action="store_true", help="no figures (default: one SVG per comparison)")
+    ap.add_argument("-o", "--outdir", required=True)
+    ap.add_argument("--prefix", default="sample")
+    a = ap.parse_args()
+    out = Path(a.outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    if a.results or a.sheet:
+        batch(jobs_from_results(a.results) if a.results else jobs_from_sheet(a.sheet), out, a.jobs, a.samples,
+              not a.no_plot)
+        return
+    if not (a.ref and a.other):
+        ap.error("give -a and -b (one sample), or --results / --sheet (batch)")
+    print("\n".join(compare_sample(a.ref, a.other, out, a.prefix, a.spades, a.gb, a.gfa, not a.no_plot)[2]))
 
 
 if __name__ == "__main__":
