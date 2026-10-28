@@ -254,20 +254,52 @@ per comparison: lengths, topology, identity, blocks, verdict, GetOrganelle probl
 | CHY007 | 16,318 linear | 17,228 circular | consistent | 910 bp beyond the linear end (control region, after trnH) |
 | CHY008 | 17,050 circular | 17,048 circular | consistent | two 1-bp deletions in poly-T runs of 14 and 11 bp (control region) |
 
-Batch: every sample of a results directory at once (samples missing a result are listed as skipped), or a sample
-sheet for any other layout:
+Structure and genes (QUAST-style, without QUAST): every contig of every assembly is also aligned locally to the
+reference with minimap2 and QUAST 5.2's own options (`-r 200`: any jump over 200 bp ends an alignment), so
+fragmented assemblies (MEANGS scaffolds), moved blocks and inversions are seen. Taken from QUAST's source:
+misassembly classes between consecutive alignments of a contig (other strand = inversion; reference/contig distance
+mismatch > 1000 bp relocation, > 200 bp local), genome fraction, duplication ratio, unaligned length, complete /
+partial genes. Changed for mitogenomes: circular reference handled whole (doubled), genes judged on the bases present
+(complete >= 90 %, partial >= 10 %, missing below; QUAST's 100-bp partial threshold would hide every tRNA), each
+junction placed against GetOrganelle's repeat regions, and each gene gets its base differences and, for protein
+genes, whether the indels break the reading frame (`<sample>.genes.tsv`; junctions, long indels, reference parts not
+in the assembly and unaligned contig parts in `<sample>.structure.tsv`). Verdict **incomplete**: no wrong sequence,
+but genes or > 1 % of the reference missing. Annotation: `--gb`, or `--gff` on the reference sequence (as QUAST
+`-g`; Geneious / MitoFinder GFF cleaned as the user's Quast/modify_gff2.py did: gene rows dropped, `Name=COX1 gene`
+-> COX1, `trnN%28guu%29` -> trnN). Tools: mafft + minimap2 in `<conda_prefix>/wgs_skim_compare`, created on first
+use (69 MB; minimap2's k8 dependency, only for paftools.js, would add a 470 MB sysroot).
+
+Batch: every sample of a results directory at once (every assembly found is compared; samples without any are
+listed as skipped), or a sample sheet for any other layout:
 
 ```bash
-wgs_skim compare --results results/ -o compare/ [--samples A,B] [-j 2]   # wgs_skim_pipeline layout (02.organelle,
-                                                                          # 03.spades, 06.mito_annotation, 10.mitofinder)
-wgs_skim compare --sheet samples.tsv -o compare/    # TSV: sample, ref, other ([label=]fasta,...), [spades, gb, gfa]
+wgs_skim compare --results results/ -o compare/ [--samples A,B] [-j 2]   # wgs_skim_pipeline layout: GetOrganelle
+                                     # 02.organelle/02_mt vs MitoFinder 10.mitofinder (+ SPAdes graph) and MEANGS
+wgs_skim compare --sheet samples.tsv -o compare/    # TSV: sample, ref, other ([label=]fasta,...), [spades, gb, gff, gfa]
 ```
 
--> `compare/all.compare.tsv`, `all.diffs.tsv` and `all.compare.html` (table + every figure). Each comparison also
-gets `<sample>.<label>.compare.svg`: genes of the reference annotation drawn on both assemblies (carried over through
-the alignment), alignment links, differences red, GetOrganelle repeat regions purple; hover for details. Plain SVG,
-no extra software (pyGenomeViz draws the same but needs a 389 MB matplotlib / numpy / Biopython environment).
-Three CHY samples, 3 at a time: 155 s, 7.2 GB peak memory (SPAdes graphs). `--no-plot` skips the figures.
+-> `compare/all.compare.tsv`, `all.diffs.tsv`, `all.structure.tsv`, `all.genes.tsv` and `all.compare.html` (table +
+every figure). Each comparison gets `<sample>.<label>.compare.svg`: genes of the reference annotation on both
+assemblies (carried over through the alignments), contigs in reference order, alignment links (orange = inverted),
+differences and misassembly junctions red, GetOrganelle repeat regions purple, reference parts missing from the
+assembly light red; hover for details. Plain SVG, no extra software (pyGenomeViz draws similar figures but needs a
+389 MB matplotlib / numpy / Biopython environment). `--no-plot` skips the figures.
+
+MJ20260820041, 3 samples x 2 assemblies, 3 at a time: 105 s, 7.2 GB peak memory (SPAdes graphs):
+
+| sample | assembly | verdict | genome fraction | genes complete / partial / missing | notes |
+|---|---|---|---|---|---|
+| CHY006 | MitoFinder | identical | 100 % | 36 / 0 / 0 | |
+| CHY006 | MEANGS (4 contigs) | incomplete | 79.8 % | 32 / 2 / 2 | rrnL, trnV missing; no wrong base |
+| CHY007 | MitoFinder | consistent | 100 % | 36 / 0 / 0 | 910 bp beyond the linear GetOrganelle end |
+| CHY007 | MEANGS (11 contigs) | incomplete | 60.1 % | 7 / 14 / 15 | no wrong base |
+| CHY008 | MitoFinder | consistent | 100 % | 36 / 0 / 0 | two poly-T lengths (control region) |
+| CHY008 | MEANGS (4 contigs) | differ | 76.9 % | 27 / 4 / 5 | one mismatch in ND2 (8741) |
+
+Synthetic checks (CHY006 reference): rotated / reverse-complemented circle - no event; 1-bp deletion in COX1 -
+COX1 frameshift; ND4 inverted - 2 inversion junctions, ND4 reverse; ATP8 deleted - ATP8 missing, 182-bp deletion;
+2-kb block moved - 3 relocations (+2000, -6000, +4000); 3 linear fragments - COX1 split, rrnL partial, two
+reference gaps.
 
 ### Multi-copy nuclear markers
 

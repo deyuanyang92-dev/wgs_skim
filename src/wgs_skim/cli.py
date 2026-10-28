@@ -125,19 +125,32 @@ def cmd_circularize(args, passthrough):
     return subprocess.run(cmd).returncode
 
 
+def compare_tools(prefix):
+    """bin directory with mafft + minimap2: <conda_prefix>/wgs_skim_compare, created on first use (69 MB:
+    minimap2 without its k8 / sysroot dependencies, which only paftools.js needs - with them 564 MB)."""
+    env = prefix / "wgs_skim_compare"
+    if not ((env / "bin" / "mafft").exists() and (env / "bin" / "minimap2").exists()):
+        conda = shutil.which("mamba") or shutil.which("conda") or next(
+            (str(p) for p in (Path.home() / "miniforge3" / "bin" / x for x in ("mamba", "conda")) if p.exists()),
+            None)
+        if not conda:
+            sys.exit("[wgs_skim] compare needs mafft and minimap2: no conda / mamba found to install them")
+        print(f"[wgs_skim] installing mafft + minimap2 into {env} (once)", file=sys.stderr, flush=True)
+        ch = ["-c", "conda-forge", "-c", "bioconda", "--override-channels"]
+        subprocess.run([conda, "create", "-y", "-q", "-p", str(env), *ch, "mafft=7.526", "libzlib"], check=True)
+        subprocess.run([conda, "install", "-y", "-q", "-p", str(env), *ch, "--no-deps", "minimap2=2.28"], check=True)
+    return env / "bin"
+
+
 def cmd_compare(args, passthrough):
     """GetOrganelle vs other mitogenome assemblies, one sample or a batch; see workflow/scripts/compare_mt.py."""
     env = dict(os.environ)
-    if not shutil.which("mafft"):               # MAFFT from the workflow's own environments
-        found = sorted(Path(args.conda_prefix).glob("*/bin/mafft"))
-        if not found:
-            sys.exit("[wgs_skim] mafft not found: put it on PATH or run `wgs_skim install` first")
-        env["PATH"] = f"{found[0].parent}{os.pathsep}{env['PATH']}"
+    env["PATH"] = f"{compare_tools(Path(args.conda_prefix))}{os.pathsep}{env['PATH']}"
     cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "compare_mt.py"),
            "-o", args.outdir, "--prefix", args.prefix, "-j", str(args.jobs)]
     cmd += [x for b in args.other or [] for x in ("-b", b)]
     cmd += ["--no-plot"] if args.no_plot else []
-    cmd += [x for k in ("ref", "spades", "gb", "gfa", "results", "sheet", "samples") if getattr(args, k)
+    cmd += [x for k in ("ref", "spades", "gb", "gff", "gfa", "results", "sheet", "samples") if getattr(args, k)
             for x in (f"--{k}", getattr(args, k))]
     return subprocess.run(cmd, env=env).returncode
 
@@ -205,8 +218,9 @@ def main(argv=None):
     m = sub.add_parser("compare", help="compare GetOrganelle with SPAdes-MitoFinder (or other) mitogenomes")
     m.add_argument("-a", "--ref", help="GetOrganelle output directory or FASTA (reference)")
     m.add_argument("-b", "--other", action="append", help="[label=]FASTA to compare (repeatable)")
-    m.add_argument("--spades", help="SPAdes directory of the other assembly (graph-based circularization)")
+    m.add_argument("--spades", help="SPAdes directory of the first -b assembly (graph-based circularization)")
     m.add_argument("--gb", help="GenBank annotation of the reference (gene of each difference)")
+    m.add_argument("--gff", help="GFF annotation on the reference sequence, instead of --gb (as QUAST -g)")
     m.add_argument("--gfa", help="reference assembly graph when -a is a FASTA")
     m.add_argument("--results", help="batch: results directory (all samples with GetOrganelle + MitoFinder)")
     m.add_argument("--sheet", help="batch: sample sheet TSV with sample, ref, other, [spades, gb, gfa]")
@@ -216,7 +230,7 @@ def main(argv=None):
     m.add_argument("-o", "--outdir", default="compare")
     m.add_argument("--prefix", default="sample")
     m.add_argument("--conda-prefix", default=default_conda_prefix(),
-                   help="where `wgs_skim install` put the environments (MAFFT is taken from there)")
+                   help="where software environments are kept (mafft + minimap2 go to wgs_skim_compare there)")
     m.set_defaults(func=cmd_compare)
 
     b = sub.add_parser("build-blastdb", help="build a fast marker BLAST database (Metazoa, <= 50 kb) from local nt")

@@ -1,0 +1,11 @@
+# wgs_skim compare: MAFFT (base-level differences on one sequence) and minimap2 (QUAST-style local alignment of
+# every contig). Reference only: `wgs_skim compare` creates <conda_prefix>/wgs_skim_compare itself, installing
+# minimap2 with --no-deps (its k8 dependency, for paftools.js only, pulls a 470 MB sysroot; 69 MB without).
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - mafft =7.526
+  - libzlib
+  - minimap2 =2.28
