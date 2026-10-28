@@ -118,31 +118,3 @@ rule mt_select:
         "../scripts/mt_select.py"
 
 
-rule getorganelle_nr:
-    """Nuclear rDNA (18S-ITS-28S) with GetOrganelle -F anonym and the bundled seed / label."""
-    input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        seed=NR_SEED,
-        label=NR_LABEL,
-    output:
-        fasta=f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta",
-    params:
-        out=lambda w, output: str(Path(output.fasta).parent / "getorganelle"),
-        collect=str(Path(workflow.basedir) / "scripts" / "collect_fasta.py"),
-        k=config["getorganelle_kmers"],
-        R=config["getorganelle_rounds"],
-    log:
-        f"{OUT}logs/getorganelle_nr/{{sample}}.log",
-    benchmark:
-        f"{OUT}benchmarks/getorganelle_nr/{{sample}}.tsv"
-    threads: 16
-    conda:
-        "../envs/getorganelle.yaml"
-    shell:
-        """
-        get_organelle_from_reads.py -1 {input.r1} -2 {input.r2} -o {params.out} -F anonym \
-            -s {input.seed} --genes {input.label} -P 0 -R {params.R} -k {params.k} -t {threads} --overwrite > {log} 2>&1 \
-            || echo "[wgs_skim] GetOrganelle rDNA failed (rc=$?)" >> {log}
-        python {params.collect} {params.out} {wildcards.sample} nr > {output.fasta}
-        """

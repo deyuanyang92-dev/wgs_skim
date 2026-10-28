@@ -21,7 +21,7 @@ clade: ""              # MitoM protein set: Chordata Arthropoda Echinodermata An
 mitos_refdir: ""       # existing MITOS2 reference directory (contains refseq89m); empty = downloaded once
 mitom_dir: ""          # your own MitoM checkout (e.g. ~/mybiosofts/Mitom) instead of the pinned versions below
 mitom_commit: "27264d2cf672c718deff6915317a7ee01852830b"      # MitoM version for mitogenome annotation
-mitom_nuc_commit: "4e9b99eb2160e098e4469d940b61f91cbb2b59ba"  # MitoM version with `mitom nuc` (rDNA annotation)
+mitom_nuc_commit: "6f75f73373ad5198c200b6da222a5975d7ee73ea"  # MitoM version with `mitom nuc` (rDNA + histones; histone classes, 2026-10-28)
 busco_lineage: ""      # lineage name (downloaded once, e.g. metazoa_odb12) or path to a downloaded lineage directory
 
 # ── Steps ─────────────────────────────────────────────────────────────────────
@@ -55,6 +55,8 @@ topology_pairs: 10000000         # read pairs used for the circular / linear che
 # ── 18S-28S rDNA ──────────────────────────────────────────────────────────────
 nr_seed: ""            # seed FASTA; empty = bundled resources/rdna (polychaete 18S/5.8S/28S, works across animals)
 nr_label: ""           # label FASTA (--genes); empty = bundled
+histone_seed: ""       # histone cluster seed FASTA; empty = bundled resources/histone (annelid H1-H4 cluster copies)
+histone_label: ""      # its label FASTA (H1-H4 genes); empty = bundled
 
 # ── Whole-genome assembly ─────────────────────────────────────────────────────
 spades_min_clean_gb: 0           # skip SPAdes for samples with less clean data than this (0 = assemble all)

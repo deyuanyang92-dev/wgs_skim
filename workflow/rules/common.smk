@@ -33,7 +33,7 @@ else:
 # ── Steps: `steps` runs only some parts (e.g. "fastp,spades,busco"); empty = everything switched on ──────
 STEP_ALIASES = {"qc": "fastp", "meangs-getorganelle": "mito", "mitogenome": "mito", "rdna": "nr", "assembly": "spades",
                 "jellyfish": "genome_size", "genomescope": "genome_size", "mitoz": "annotate", "mitom": "annotate",
-                "nuc": "nuclear", "histone": "nuclear", "histones": "nuclear", "report": "summary"}
+                "nuc": "nuclear", "histone": "nr", "histones": "nr", "report": "summary"}
 STEPS_ALL = ["fastp", "meangs", "mito", "getorganelle", "nr", "spades", "busco", "genome_size", "annotate", "topology",
              "blast", "nuclear", "summary"]
 STEPS = [STEP_ALIASES.get(x, x) for x in re.split(r"[,\s]+", str(config.get("steps") or "").strip()) if x]
@@ -69,6 +69,8 @@ MITOM_DB = DB / "mitom"
 MITOM_NUC_DB = DB / "mitom_nuc"
 NR_SEED = config.get("nr_seed") or str(RES / "rdna" / "seed.fasta")
 NR_LABEL = config.get("nr_label") or str(RES / "rdna" / "label.fasta")
+HIST_SEED = config.get("histone_seed") or str(RES / "histone" / "seed.fasta")
+HIST_LABEL = config.get("histone_label") or str(RES / "histone" / "label.fasta")
 
 wildcard_constraints:
     sample="|".join(re.escape(s) for s in SAMPLES),
@@ -101,13 +103,13 @@ def final_outputs():
             "meangs": [rules.meangs.output.seed],
             "mito": [rules.mt_select.output.fasta],
             "getorganelle": [rules.mt_iterate.output.fasta],
-            "nr": [rules.getorganelle_nr.output.fasta],
+            "nr": [rules.nr_annotate.output.gb, rules.histone_annotate.output.gb],
             "spades": [rules.spades.output.scaffolds],
             "busco": [rules.busco.output.summary],
             "genome_size": [rules.genomescope.output.summary],
             "annotate": [rules.mitom_annotate.output.gb],
             "topology": [rules.topology.output.tsv],
-            "nuclear": [rules.nuc_copies.output.tsv],
+            "nuclear": [rules.nuc_copies.output.tsv, rules.nuc_compare.output.tsv],
         }
         out = [f for x in STEPS for t in targets.get(x, []) for f in expand(t, sample=s)]
         if "blast" in STEPS:
@@ -120,6 +122,9 @@ def final_outputs():
         out += expand(f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
     if config["nr"]:
         out += expand(f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta", sample=s)
+        out += expand([rules.nr_annotate.output.gb, rules.histone_annotate.output.gb], sample=s)
+        if config["assembly"] and config["nuc_markers"]:
+            out += expand(rules.nuc_compare.output.tsv, sample=s)
     return out
 
 

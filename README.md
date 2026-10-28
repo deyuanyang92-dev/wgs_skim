@@ -308,6 +308,29 @@ reference gaps.
 (H1, H2A, H2B, H3, H4) in the whole-genome assembly with `mitom nuc`: every copy, one consensus per gene, and the
 copy number = coverage of the gene's contigs / coverage of BUSCO single-copy contigs.
 
+Two ways for each marker, compared (rules in `workflow/rules/nuclear.smk`, code in `workflow/scripts/nuclear_markers.py`):
+
+- **GetOrganelle** assembles the tandem unit from the reads (`-F anonym`): rDNA with `resources/rdna`, histones with
+  `resources/histone` (H1-H4 cluster copies of annelids + Hesionidae H3; an H3-only label kept only the H3 piece).
+  MitoM annotates it: `rdna/<sample>/<sample>.rdna.gbf`, `histone/<sample>/<sample>.histone.gbf` (GenBank).
+- **SPAdes-MitoM**: the copies scattered over the SPAdes contigs, one consensus per gene (`nuclear/<sample>/`).
+- `nuclear/<sample>/<sample>.nuc_compare.tsv`: per gene both lengths, partial ends, histone class, mismatches and
+  indels on the overlap, verdict identical / contained (the partial one inside the other) / differ / only one side.
+
+Histone copies are classed by MitoM: replication-dependent (the cluster; H3 residues 31/87/89/90 = A S V M),
+replacement (H3.3 = S A I G, or spliced) or single-copy (coverage < 2x the genome); each gene's consensus takes a
+cluster copy first (MJ20260820041: SPAdes splits the cluster into 84-134 nt contigs, and the old rule took H3.3).
+
+For an existing results directory (this workflow's or Temp_scripts/wgs_skim_pipeline's), the same steps in one
+command, resumable (finished assemblies reused; annotations redone when MitoM changes):
+
+```bash
+wgs_skim nuclear --results results/ -o nuclear_markers/ [--samples A,B] [--markers rdna,histone] [-j 3] [--all-reads]
+```
+
+-> `nuclear_markers/{rdna,histone}/{getorganelle,annotation,spades_mitom}/<sample>/`, `summary.tsv` (every sample x
+gene), `README.txt`. `--all-reads`: the histone GetOrganelle with all reads, -R 20, k 21-127 (the user's 2024 setting).
+
 ## Output
 
 ```
@@ -316,10 +339,11 @@ wgs_skim_results/
 │   summary/report.html        rDNA length, topology verdicts, SPAdes N50, BUSCO, genome size, heterozygosity, top BLAST hits
 ├── qc/<sample>/               clean reads, fastp.html / fastp.json
 ├── mito/<sample>/<sample>.mt.fasta   final mitogenome (+ .mt.json: source, circular, why iteration stopped); round0..N
-├── rdna/<sample>/<sample>.nr.fasta   18S-ITS-28S (+ .nr.gb / .nr_features.tsv: 18S ITS1 5.8S ITS2 28S, mitom nuc)
+├── rdna/<sample>/<sample>.nr.fasta   18S-ITS-28S (+ .rdna.gbf / .nr_features.tsv: 18S ITS1 5.8S ITS2 28S, mitom nuc)
+├── histone/<sample>/<sample>.histone.fasta   histone cluster (+ .histone.gbf: H1 H2A H2B H3 H4, mitom nuc)
 ├── annotation/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
 ├── topology/<sample>/         read-based circular / linear check, end diagnosis
-├── nuclear/<sample>/          rDNA + histone copies, consensus, copy_number.tsv
+├── nuclear/<sample>/          rDNA + histone copies in SPAdes, consensus, copy_number.tsv, nuc_compare.tsv
 ├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary
 ├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
 ├── blast/blast_topn.tsv       COX1 / rDNA top hits with GenBank organism and taxonomy

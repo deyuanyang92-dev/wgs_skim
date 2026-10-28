@@ -9,6 +9,7 @@
     wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
     wgs_skim compare -a getorganelle_dir -b mitofinder_mt.fasta --spades spades_dir   # are the assemblies the same?
     wgs_skim compare --results results/ -o compare/                              # every sample at once
+    wgs_skim nuclear --results results/ -o nuclear/   # rDNA + histones: GetOrganelle, MitoM .gbf, vs SPAdes
     wgs_skim config > my.yaml                         # all options with comments
 
 Anything after `--` goes to snakemake unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
@@ -155,6 +156,26 @@ def cmd_compare(args, passthrough):
     return subprocess.run(cmd, env=env).returncode
 
 
+def cmd_nuclear(args, passthrough):
+    """rDNA + histones of every sample of a results directory; see workflow/scripts/nuclear_markers.py."""
+    prefix = Path(args.conda_prefix)
+    def env_with(*tools):                       # an environment of the workflow (or the user's) that has the tools
+        for d in sorted(prefix.glob("*/")) + sorted((Path.home() / "miniforge3" / "envs").glob("*/")):
+            if all((d / "bin" / t).exists() for t in tools):
+                return d / "bin"
+        sys.exit(f"[wgs_skim] no environment with {', '.join(tools)}: run `wgs_skim install` first")
+    go = env_with("get_organelle_from_reads.py", "bowtie2") / "get_organelle_from_reads.py"
+    py = env_with("exonerate", "cmsearch", "tblastn", "table2asn") / "python"
+    mitom = Path(args.mitom) if args.mitom else HOME / "db" / "mitom_nuc" / "Mitom"
+    if not (mitom / "mito_nuc.py").exists():
+        sys.exit(f"[wgs_skim] {mitom}: no MitoM with `mitom nuc` (--mitom, or run the workflow once)")
+    cmd = [str(py), str(workflow_root() / "workflow" / "scripts" / "nuclear_markers.py"), "batch",   # Biopython
+           "--results", args.results, "-o", args.outdir, "--markers", args.markers, "-j", str(args.jobs),
+           "--mitom", str(mitom), "--mitom-python", str(py), "--getorganelle", str(go)]
+    cmd += (["--samples", args.samples] if args.samples else []) + (["--all-reads"] if args.all_reads else [])
+    return subprocess.run(cmd + passthrough).returncode
+
+
 def cmd_build_blastdb(args, passthrough):
     """Small marker BLAST database (one taxon, short records) from a local nt; see build_marker_db.py."""
     cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "build_marker_db.py"), "--nt", args.nt,
@@ -232,6 +253,17 @@ def main(argv=None):
     m.add_argument("--conda-prefix", default=default_conda_prefix(),
                    help="where software environments are kept (mafft + minimap2 go to wgs_skim_compare there)")
     m.set_defaults(func=cmd_compare)
+
+    n = sub.add_parser("nuclear", help="rDNA + histones of a results directory: GetOrganelle, MitoM .gbf, vs SPAdes")
+    n.add_argument("--results", required=True, help="results directory (wgs_skim or wgs_skim_pipeline layout)")
+    n.add_argument("-o", "--outdir", default="nuclear_markers")
+    n.add_argument("--samples", help="only these samples (comma-separated)")
+    n.add_argument("--markers", default="rdna,histone")
+    n.add_argument("-j", "--jobs", type=int, default=3, help="samples at a time (GetOrganelle 16 threads each)")
+    n.add_argument("--all-reads", action="store_true", help="histone GetOrganelle with all reads, -R 20, k 21-127")
+    n.add_argument("--mitom", help="MitoM checkout (default: the workflow's, <WGS_SKIM_HOME>/db/mitom_nuc/Mitom)")
+    n.add_argument("--conda-prefix", default=default_conda_prefix(), help="where the software environments are")
+    n.set_defaults(func=cmd_nuclear)
 
     b = sub.add_parser("build-blastdb", help="build a fast marker BLAST database (Metazoa, <= 50 kb) from local nt")
     b.add_argument("--nt", required=True, help="local nt prefix, e.g. /db/blast/nt")
