@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -61,7 +62,7 @@ BLAST_NR = [x.strip() for x in str(config["blast_nr"]).split(",") if x.strip()]
 TOPOLOGY = {True: "yes", False: "no"}.get(config["topology"], str(config["topology"]))
 config["topology"] = TOPOLOGY != "no"
 
-OUT = "" if config["outdir"].strip("./") == "" else config["outdir"].rstrip("/") + "/"   # path prefix; "./x" makes Snakemake warn
+OUT = os.path.join(os.path.normpath(config["outdir"]), "").removeprefix(f".{os.sep}")   # "./x" makes Snakemake warn
 RES = Path(workflow.basedir).parent / "resources"           # bundled files (read-only is fine)
 DB = Path(config.get("db_dir") or RES).expanduser()            # downloaded databases (GetOrganelle, BUSCO)
 MITOM_DB = DB / "mitom"
