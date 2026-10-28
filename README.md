@@ -93,6 +93,26 @@ email: you@example.com
 busco_lineage: /data/db/busco/metazoa_odb12
 ```
 
+#### A fast BLAST database for species checks
+
+BLAST reads the whole database for every search and is disk-bound: full nt (3.4 Tbases, ~1.2 TB) took 38-52 min
+for one COX1 + rDNA search on MJ20260820041, with 8 or 32 threads and with or without `-taxids` Metazoa. Barcode
+and marker queries are matched by short records (mitogenomes, rDNA, gene sequences), so build a Metazoa database of
+records up to 50 kb once from the local nt:
+
+```bash
+wgs_skim build-blastdb --nt /data/db/nt/nt --out /data/db/metazoa_marker/metazoa_marker   # --taxid, --max-length
+```
+
+| database | size | search (same queries) | COX1 top 5 | rDNA top hit |
+|---|---|---|---|---|
+| nt | ~1.2 TB | 2273-2545 s | NC_063122 79.9% ... | KY753844 *Pisione* sp. 93.6% |
+| Metazoa ≤ 50 kb (71.3 M records) | 68 GB | 121 s first, 22 s cached | identical | identical |
+
+Left out: chromosome-scale genome assemblies (e.g. Darwin Tree of Life OZ chromosomes that carry an rDNA copy). They
+ranked 2nd-5th for rDNA here, behind the same top hit; point `blast_db` at full nt when a species is known only from
+such an assembly. Building took 6.8 h (extraction 5 h, makeblastdb 1.7 h) and ~620 GB of temporary disk space.
+
 ### Running single steps
 
 `--steps` (or `steps:` in a config file, `--config steps=...` with Snakemake) runs only the named steps; the steps

@@ -112,6 +112,13 @@ def cmd_circularize(args, passthrough):
     return subprocess.run(cmd).returncode
 
 
+def cmd_build_blastdb(args, passthrough):
+    """Small marker BLAST database (one taxon, short records) from a local nt; see build_marker_db.py."""
+    cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "build_marker_db.py"), "--nt", args.nt,
+           "--out", args.out, "--taxid", str(args.taxid), "--max-length", str(args.max_length)]
+    return subprocess.run(cmd + passthrough).returncode
+
+
 def cmd_config(args, passthrough):
     sys.stdout.write((workflow_root() / "config" / "config.yaml").read_text())
     return 0
@@ -164,6 +171,13 @@ def main(argv=None):
     z.add_argument("--spades", help="SPAdes output directory: use its assembly graph (strongest check, fills gaps)")
     z.add_argument("--prefix", default="sample")
     z.set_defaults(func=cmd_circularize)
+
+    b = sub.add_parser("build-blastdb", help="build a fast marker BLAST database (Metazoa, <= 50 kb) from local nt")
+    b.add_argument("--nt", required=True, help="local nt prefix, e.g. /db/blast/nt")
+    b.add_argument("--out", required=True, help="output prefix, e.g. /db/blast_marker/metazoa_marker")
+    b.add_argument("--taxid", type=int, default=33208, help="taxon to keep (default 33208 = Metazoa)")
+    b.add_argument("--max-length", type=int, default=50000, help="longest record kept (default 50000 bp)")
+    b.set_defaults(func=cmd_build_blastdb)
 
     c = sub.add_parser("config", help="print the default configuration with comments")
     c.set_defaults(func=cmd_config)
