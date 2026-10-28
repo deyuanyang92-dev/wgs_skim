@@ -111,7 +111,8 @@ wgs_skim build-blastdb --nt /data/db/nt/nt --out /data/db/metazoa_marker/metazoa
 
 Left out: chromosome-scale genome assemblies (e.g. Darwin Tree of Life OZ chromosomes that carry an rDNA copy). They
 ranked 2nd-5th for rDNA here, behind the same top hit; point `blast_db` at full nt when a species is known only from
-such an assembly. Building took 6.8 h (extraction 5 h, makeblastdb 1.7 h) and ~620 GB of temporary disk space.
+such an assembly. Building needs a temporary FASTA of ~210 GB (deleted at the end) and several hours; makeblastdb
+alone took 1.7 h here.
 
 ### Running single steps
 
