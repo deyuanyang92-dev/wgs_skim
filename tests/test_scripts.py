@@ -416,6 +416,14 @@ def test_mitofinder_collect_no_contig(tmp_path):
     assert exe[:3] == ["singularity", "exec", "--cleanenv"] and exe.count("-B") == 1 and exe[-1] == "mitofinder"
 
 
+def test_split_by_id_sample_before_bar(tmp_path):
+    f = tmp_path / "merged.fasta"
+    f.write_text(">A|mt|1 circular\nAC\n>A|mt|2 linear\nGT\n>B2 COI\nTT\n")
+    out = samples.split_fasta([f], tmp_path / "split")
+    assert sorted(out) == ["A", "B2"]
+    assert Path(out["A"]).read_text() == ">A_contig1\nAC\n>A_contig2\nGT\n"
+
+
 def test_mitofinder_prefilter_coverage():
     import mitofinder_prefilter as mp
     assert mp.weighted_median([(100, 1.0), (100, 2.0), (1000, 50.0)]) == 50.0

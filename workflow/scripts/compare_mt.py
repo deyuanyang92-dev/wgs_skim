@@ -26,6 +26,7 @@ Needs mafft on PATH.
 """
 import argparse
 import csv
+import json
 import re
 import subprocess
 import sys
@@ -389,6 +390,14 @@ def write_tables(out, prefix, summaries, diffs, structs, gene_rows):
 # wgs_skim_pipeline (Temp_scripts): GetOrganelle 02.organelle/02_mt, SPAdes 03.spades, MitoFinder 10.mitofinder.
 # MEANGS (02.organelle/01.MEANGS_results) is not compared: it only gives GetOrganelle its seed (user, 2026-10-28).
 LAYOUTS = {
+    "wgs_skim": {                                   # `wgs_skim run` with the mitogenome and spades-mitofinder steps
+        "samples": "mito/*",
+        "ref": "mito/{s}/{round}",                  # the GetOrganelle round mt_iterate chose (its graph too)
+        "other": ["mitofinder=mitofinder/spades/{s}/{s}.mitofinder.fasta"],
+        "spades": "assembly/{s}/spades",
+        "graph_for": "mitofinder",
+        "gb": "annotation/{s}/{s}.mt.gb",
+    },
     "wgs_skim_pipeline": {
         "samples": "02.organelle/02_mt/*",
         "ref": "02.organelle/02_mt/{s}",
@@ -411,7 +420,9 @@ def jobs_from_results(results):
         jobs = []
         for d in dirs:
             s = d.name
-            f = lambda t: str(res / t.format(s=s))  # noqa: E731
+            st = d / f"{s}.getorganelle.json"
+            rnd = json.load(open(st)).get("round", "round0") if st.exists() else "round0"
+            f = lambda t: str(res / t.format(s=s, round=rnd))  # noqa: E731
             jobs.append({"sample": s, "ref": f(lay["ref"]), "spades": f(lay["spades"]), "gb": f(lay["gb"]),
                          "graph_for": lay.get("graph_for"),
                          "other": [o.split("=", 1)[0] + "=" + f(o.split("=", 1)[1]) for o in lay["other"]]})

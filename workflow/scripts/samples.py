@@ -119,14 +119,15 @@ def fasta_samples(inputs, split_dir=None, split_by_id=False):
 
 
 def split_fasta(files, split_dir):
-    """one FASTA per sample from the first word of each header (see fasta_samples)"""
+    """one FASTA per sample from the first word of each header, up to a '|' (see fasta_samples): >B2 ..., >B2|COI
+    and wgs_skim's own >B2|mt|1 ... all belong to sample B2"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from seqtools import iter_fasta
     recs = {}
     for f in files:
         for header, seq in iter_fasta(f, upper=False):
             if header.split():
-                recs.setdefault(header.split()[0], []).append((header, seq))
+                recs.setdefault(header.split()[0].split("|")[0], []).append((header, seq))
     recs.pop("", None)
     split_dir.mkdir(parents=True, exist_ok=True)
     out = {}
