@@ -63,7 +63,9 @@ MF_ASSEMBLERS = ("megahit", "metaspades", "spades", "rnaspades", "trinity")
 
 
 def _mitofinder_opts(p):
-    p.add_argument("--ref", help="reference mitogenome(s) GenBank of related species (required)")
+    p.add_argument("--ref", nargs="+", metavar="GB|DIR", help="reference mitogenome(s) of related species, "
+                   "GenBank (required): several files / a directory are merged - several related species find more "
+                   "genes (sim5: 12-13 -> 15 of 15 with 5 related references)")
     p.add_argument("--assembler", default="megahit", metavar="A[,A]",
                    help="with -r: what assembles the reads for MitoFinder: megahit / metaspades (MitoFinder's own), "
                         "spades (SPAdes genome), rnaspades / trinity (transcripts: mt genes from RNA-seq); several = "
@@ -83,7 +85,7 @@ def _mitofinder_conf(a, conf, fasta):
     if bad:
         sys.exit(f"[wgs_skim] unknown --assembler {', '.join(bad)}: {' '.join(MF_ASSEMBLERS)}")
     src = {"rnaspades": "rna"}                      # MitoFinder source names (rules/mitofinder.smk)
-    conf.update(mitofinder_blast=not a.no_check, blast_db=a.db, mitofinder_ref=Path(a.ref).resolve(),
+    conf.update(mitofinder_blast=not a.no_check, blast_db=a.db, mitofinder_ref=merged_ref(a.ref, a.outdir_path),
                 mitofinder_trna=a.trna,
                 mitofinder_assembly="given" if fasta else ",".join(src.get(x, x) for x in asm))
     if not fasta:                                   # the assemblers that are workflow steps run first
@@ -142,6 +144,23 @@ def fasta_sheet(inputs, out, column, split_by_id=False, only=None):
     return sheet
 
 
+def merged_ref(refs, out):
+    """one GenBank file of every reference given (files, directories of .gb / .gbk / .gbf); a single file as it is"""
+    files = [f for r in refs for f in (sorted(x for x in Path(r).iterdir() if x.suffix in (".gb", ".gbk", ".gbf",
+                                                                                        ".genbank"))
+                                       if Path(r).is_dir() else [Path(r)])]
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing or not files:
+        sys.exit(f"[wgs_skim] reference GenBank not found: {', '.join(missing) or ' '.join(refs)}")
+    if len(files) == 1:
+        return files[0].resolve()
+    dst = Path(out) / ".wgs_skim" / "mitofinder_refs.gb"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text("".join(f.read_text().rstrip() + "\n" for f in files))
+    print(f"[wgs_skim] {len(files)} reference GenBank files merged -> {dst}", flush=True)
+    return dst
+
+
 def tool_config(a, out):
     """(workflow options, uses FASTA input) of `wgs_skim <tool>` arguments"""
     t = TOOLS[a.tool]
@@ -151,6 +170,7 @@ def tool_config(a, out):
     if not use_fasta and not (a.reads_dir or a.samples):
         sys.exit(f"[wgs_skim] give the reads: wgs_skim {t.name} -r READS_DIR (or -s sheet.tsv)"
                  + (" or assemblies: -i FASTA" if t.inputs == "both" else ""))
+    a.outdir_path = out
     conf = {"outdir": ".", "db_dir": HOME / "db", "taxon": a.taxon, "qc": True}
     if use_fasta:
         conf["samples"] = fasta_sheet(a.input, out, t.column, a.split_by_id, a.only)

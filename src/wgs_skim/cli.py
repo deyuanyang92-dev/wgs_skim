@@ -29,7 +29,7 @@ from pathlib import Path
 from . import __version__
 from .engine import base_cmd, execute, nextflow, snakemake
 from .paths import HOME, TAXA, default_conda_prefix, job_mem_gb, scripts_dir, workflow_root
-from .tools import TOOLS, tool_config
+from .tools import TOOLS, merged_ref, tool_config
 
 # the modules behind the commands: paths (where things are), engine (Snakemake / Nextflow command), tools (the
 # per-tool commands), api (the same from Python), lib (workflow/scripts as a library)
@@ -44,7 +44,7 @@ def cmd_run(args, passthrough):
             "outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "blast_db": args.blast_db, "email": args.email,
             "busco_lineage": args.busco_lineage, "steps": args.steps,
             "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes,
-            "mitofinder_ref": Path(args.mitofinder_ref).resolve() if args.mitofinder_ref else None}
+            "mitofinder_ref": merged_ref(args.mitofinder_ref, out) if args.mitofinder_ref else None}
     run = nextflow if args.engine == "nextflow" else snakemake
     return run(conf, out, args.cores, job_mem_gb(args.mem_gb), args.conda_prefix, args.configfile, args.config,
                args.dry_run, passthrough)
@@ -201,7 +201,8 @@ def parser():
     r.add_argument("--spades-modes", metavar="M[,M]",
                    help="SPAdes modes: genome (default) and/or isolate, sc, meta, rna, rnaviral, plasmid, "
                         "metaplasmid, metaviral, bio, sewage, corona (one assembly + BUSCO each)")
-    r.add_argument("--mitofinder-ref", help="MitoFinder reference GenBank (combination spades-mitofinder; default: "
+    r.add_argument("--mitofinder-ref", nargs="+", metavar="GB|DIR", help="(several files / a directory: merged) "
+                   + "MitoFinder reference GenBank (combination spades-mitofinder; default: "
                    "the sample's own MitoM annotation when the mitogenome step runs too)")
     r.add_argument("--blast-db", help="local nt database prefix (default: NCBI online BLAST)")
     r.add_argument("--blast-mt", metavar="Q[,Q]",
