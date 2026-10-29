@@ -4,7 +4,7 @@ wgs_skim 是动物基因组浅测序（genome skimming）的批量分析软件�
 核多拷贝基因（18S-ITS-28S rDNA、组蛋白 H1–H4）组装与注释、SPAdes 全基因组组装（含 rnaSPAdes、meta、plasmid 等各种模式）
 与 Trinity 转录组组装、BUSCO 评估、基因组大小、BLAST 物种鉴定，最后生成汇总表与报告。
 
-所有批量任务都由 **Snakemake** 管理（按 CPU 与内存调度、每个任务单独日志、中断后断点续跑），同时提供 **Nextflow** 版本。
+所有批量任务都由 **Snakemake** 管理（按 CPU 与内存调度、每个任务单独日志、中断后断点续跑），**Nextflow** 版本正在开发与测试中（完成后在 [[资源调度与续跑|Resources-and-resume]] 中说明）。
 
 | 页面 | 内容 |
 |---|---|
@@ -16,7 +16,7 @@ wgs_skim 是动物基因组浅测序（genome skimming）的批量分析软件�
 | [[核多拷贝基因|Nuclear-markers]] | rDNA 与组蛋白：GetOrganelle 组装、MitoM 注释（.gbf）、与 SPAdes 比较 |
 | [[SPAdes 各模式与转录组|Assembly-modes]] | genome / rna / meta / plasmid … 、Trinity、BUSCO |
 | [[BLAST 物种鉴定|BLAST]] | 本地小库、在线 BLAST、查询基因 |
-| [[资源调度与续跑|Resources-and-resume]] | Snakemake / Nextflow、CPU 与内存、续跑、集群 |
+| [[资源调度与续跑|Resources-and-resume]] | Snakemake：CPU 与内存、进度、续跑、集群 |
 | [[配置参数|Configuration]] | 全部配置项 |
 | [[输出文件|Output]] | 结果目录结构、汇总表各列 |
 | [[报错排查|Troubleshooting]] | 常见报错、原因、解决办法 |
