@@ -48,11 +48,12 @@ def find_pairs(reads_dir):
 
 
 def read_sheet(path):
-    """samples.tsv / .csv with columns sample, fastq_1, fastq_2 (nf-core style); relative paths are relative to the sheet."""
+    """samples.tsv / .csv with columns sample, fastq_1, fastq_2 (nf-core style); relative paths are relative to the
+    sheet. Further optional columns: see sheet_columns (scaffolds)."""
     p = Path(path).expanduser().resolve()
     delim = "," if p.suffix == ".csv" else "\t"
     pairs = {}
-    with open(p, newline="") as fh:
+    with open(p, newline="", encoding="utf-8-sig") as fh:
         for row in csv.DictReader(fh, delimiter=delim):
             s = row["sample"].strip()
             r1, r2 = (Path(row[k].strip()).expanduser() for k in ("fastq_1", "fastq_2"))
@@ -61,6 +62,23 @@ def read_sheet(path):
                 raise ValueError(f"sample {s!r} listed twice in {p}")
             pairs[s] = (str(r1.resolve()), str(r2.resolve()))
     return pairs
+
+
+def sheet_columns(path, columns):
+    """Optional per-sample files from extra sheet columns, e.g. `scaffolds` (an existing SPAdes assembly, used instead
+    of running SPAdes): {sample: {column: absolute path}}, only for cells that are filled in."""
+    p = Path(path).expanduser().resolve()
+    delim = "," if p.suffix == ".csv" else "\t"
+    out = {}
+    with open(p, newline="", encoding="utf-8-sig") as fh:
+        for row in csv.DictReader(fh, delimiter=delim):
+            for c in columns:
+                v = (row.get(c) or "").strip()
+                if v:
+                    f = Path(v).expanduser()
+                    f = f if f.is_absolute() else p.parent / f
+                    out.setdefault(row["sample"].strip(), {})[c] = str(f.resolve())
+    return out
 
 
 if __name__ == "__main__":

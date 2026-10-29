@@ -6,6 +6,8 @@ rule fastp:
         r2=f"{OUT}qc/{{sample}}/{{sample}}.R2.fq.gz",
         html=f"{OUT}qc/{{sample}}/{{sample}}.fastp.html",
         json=f"{OUT}qc/{{sample}}/{{sample}}.fastp.json",
+    resources:
+        mem_mb=2000,
     log:
         f"{OUT}logs/fastp/{{sample}}.log",
     benchmark:

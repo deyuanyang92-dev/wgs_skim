@@ -6,11 +6,14 @@ rule topology:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
         annotation=lambda wc: rules.mitom_annotate.output.gb if config["annotate"] else [],
+        status=rules.mt_select.output.status,
     output:
         tsv=f"{OUT}topology/{{sample}}/{{sample}}.topology.tsv",
     params:
         pairs=config["topology_pairs"],
         mode=TOPOLOGY,
+    resources:
+        mem_mb=8000,
     log:
         f"{OUT}logs/topology/{{sample}}.log",
     benchmark:

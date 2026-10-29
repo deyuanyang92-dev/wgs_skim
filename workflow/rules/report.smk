@@ -8,8 +8,12 @@ rule summary:
     params:
         samples=list(SAMPLES),
         taxon=config["taxon"],
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/summary.log",
+    benchmark:
+        f"{OUT}benchmarks/summary.tsv"
     conda:
         "../envs/python.yaml"
     script:

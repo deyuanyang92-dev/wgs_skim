@@ -9,7 +9,7 @@ from snakemake.utils import validate
 validate(config, schema="../schemas/config.schema.yaml")
 
 sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
-from samples import find_pairs, read_sheet  # noqa: E402
+from samples import find_pairs, read_sheet, sheet_columns  # noqa: E402
 
 # ── Taxon presets (YZZ Team groups); explicit config keys win ────────────────
 TAXA = {
@@ -25,8 +25,10 @@ for key, value in TAXA[config["taxon"]].items():
 # ── Samples: sample sheet or automatic detection in reads_dir ────────────────
 if config.get("samples"):
     SAMPLES = read_sheet(config["samples"])
+    GIVEN = sheet_columns(config["samples"], ["scaffolds"])   # optional: an existing SPAdes assembly per sample
 elif config.get("reads_dir"):
     SAMPLES = find_pairs(config["reads_dir"])
+    GIVEN = {}
 else:
     raise WorkflowError("give the reads directory: --config reads_dir=/path/to/rawdata (or samples=sheet.tsv)")
 
@@ -47,7 +49,7 @@ if STEPS:
     config["topology"] = "yes" if "topology" in want else "no"
     config["blast"] = "blast" in want
     config["mito"] = bool(want & {"mito", "getorganelle", "annotate", "topology", "blast"})
-    config["nr"] = bool(want & {"nr", "blast"})
+    config["nr"] = bool(want & {"nr", "blast", "nuclear"})
     config["assembly"] = bool(want & {"spades", "busco", "nuclear"})
     config["nuc_markers"] = "nuclear" in want
     config["genome_size"] = "genome_size" in want
@@ -63,6 +65,7 @@ TOPOLOGY = {True: "yes", False: "no"}.get(config["topology"], str(config["topolo
 config["topology"] = TOPOLOGY != "no"
 
 OUT = os.path.join(os.path.normpath(config["outdir"]), "").removeprefix(f".{os.sep}")   # "./x" makes Snakemake warn
+OUT_PATH = os.path.normpath(config["outdir"])
 RES = Path(workflow.basedir).parent / "resources"           # bundled files (read-only is fine)
 DB = Path(config.get("db_dir") or RES).expanduser()            # downloaded databases (GetOrganelle, BUSCO)
 MITOM_DB = DB / "mitom"
@@ -71,6 +74,18 @@ NR_SEED = config.get("nr_seed") or str(RES / "rdna" / "seed.fasta")
 NR_LABEL = config.get("nr_label") or str(RES / "rdna" / "label.fasta")
 HIST_SEED = config.get("histone_seed") or str(RES / "histone" / "seed.fasta")
 HIST_LABEL = config.get("histone_label") or str(RES / "histone" / "label.fasta")
+
+if STEPS and set(STEPS) == {"summary"}:
+    def have(pattern):
+        return all(Path(OUT_PATH, pattern.format(sample=s)).exists() for s in SAMPLES)
+    config["mito"] = have("mito/{sample}/{sample}.mt.fasta")
+    config["nr"] = have("rdna/{sample}/{sample}.nr.fasta")
+    config["assembly"] = have("assembly/{sample}/{sample}.busco.txt")
+    config["nuc_markers"] = have("nuclear/{sample}/{sample}.copy_number.tsv")
+    config["genome_size"] = have("genome_size/{sample}/{sample}.genomescope.txt")
+    config["annotate"] = have("annotation/{sample}/{sample}.mt.gb")
+    config["topology"] = "yes" if have("topology/{sample}/{sample}.topology.tsv") else "no"
+    config["blast"] = Path(OUT_PATH, "blast/blast_topn.tsv").exists()
 
 wildcard_constraints:
     sample="|".join(re.escape(s) for s in SAMPLES),
@@ -91,8 +106,28 @@ def clean_gb(json_file):
 
 def spades_mem_mb(wildcards, input, attempt):
     """SPAdes -m is a hard limit: estimate from clean data and grow 1.5x on each retry."""
+    if GIVEN.get(wildcards.sample, {}).get("scaffolds"):
+        return 1000
     est = clean_gb(input.json) * config["spades_gib_per_gb"]
     return int(max(config["spades_min_mem_gb"], est) * 1.5 ** (attempt - 1) * 1024)
+
+
+# Memory per job (resources: mem_mb) so that `snakemake --resources mem_mb=N` (wgs_skim run --mem-gb) schedules by
+# memory as well as cores. Measured peaks (benchmarks/*/*.tsv max_rss, 0.6 Gb test sample 2026-10-28): fastp 0.4 GB,
+# MEANGS 7.6 (fixed 2 M reads), GetOrganelle mt 3.2, rDNA 0.8, histones 1.6, SPAdes 6.9, BUSCO 2.0, jellyfish 6.8
+# (-s 2G hash, independent of data), MitoM 0.2, mitom nuc on scaffolds 2.0, topology 0.9, BLAST 48.6 (nt pages mapped
+# in memory; counted but shared). GetOrganelle grows with the reads it uses: ~1 GB per Gb (36 GB for 48 Gb, CHY006).
+def getorganelle_mem_mb(gb_cap):
+    """mem_mb for GetOrganelle rounds that use up to gb_cap Gb of reads (0 = all clean reads)"""
+    def f(wildcards, input, attempt):
+        gb = clean_gb(input.json)
+        used = min(gb, gb_cap) if gb_cap else gb
+        return int(max(8, 1.2 * used) * 1024 * attempt)
+    return f
+
+
+MT_ITER_MEM = getorganelle_mem_mb(config["mt_iter_max_data_gb"])
+NUC_MEM = getorganelle_mem_mb(max(float(x) for x in str(config["nuclear_max_gb"]).split(",") if x.strip()))
 
 
 def final_outputs():
@@ -102,7 +137,7 @@ def final_outputs():
             "fastp": [rules.fastp.output.json],
             "meangs": [rules.meangs.output.seed],
             "mito": [rules.mt_select.output.fasta],
-            "getorganelle": [rules.mt_iterate.output.fasta],
+            "getorganelle": [rules.mt_select.output.fasta],
             "nr": [rules.nr_annotate.output.gb, rules.histone_annotate.output.gb],
             "spades": [rules.spades.output.scaffolds],
             "busco": [rules.busco.output.summary],

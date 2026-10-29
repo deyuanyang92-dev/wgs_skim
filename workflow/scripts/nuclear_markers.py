@@ -9,9 +9,13 @@ is split into 84-134 nt contigs; GetOrganelle from H1-H4 seeds gave the cluster 
 Histones (MJ20260820041, CHY006): a label of H3 only kept just the H3 piece of the cluster (2.2 kb); H1-H4 cluster
 copies as seed / label (resources/histone) gave all five genes.
 
-Reads (user, 2026-10-28): multi-copy units need little data - round 1 uses at most 5 Gb; when the unit does not
-close (no circular path), round 2 uses 10 Gb with round 1's result as the seed (the iteration of mt_iterate.py).
-An assembly the results directory already has (rDNA of wgs_skim_pipeline) counts as round 1.
+Reads (user, 2026-10-28): multi-copy units need little data - round 1 uses at most 5 Gb; when the unit is not
+complete, round 2 uses 10 Gb with round 1's result as the seed (the iteration of mt_iterate.py). Complete = the
+path is circular, or every core gene of the unit (rDNA: 18S, 5.8S, 28S; histones: H2A, H2B, H3, H4 - H1 is often
+outside the cluster) is covered end to end by a label sequence (blastn, >= 95 % of the label): a linear rDNA unit
+with all genes is complete (MJ20260820041: 18 of 22 rDNA units are linear with every gene whole; a 10 Gb round
+on them would cost 15-40 min each for nothing). An assembly the results directory already has (rDNA of
+wgs_skim_pipeline) counts as round 1.
 
 Subcommands (also used by the workflow rules, workflow/rules/nuclear.smk):
   assemble  GetOrganelle -F anonym of a multi-copy unit (--kind rdna | histone) from clean reads, in rounds
@@ -23,13 +27,36 @@ Subcommands (also used by the workflow rules, workflow/rules/nuclear.smk):
 import argparse
 import csv
 import os
+import re
 import shutil
 import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from collect_fasta import clean  # noqa: E402
+
 RES = Path(__file__).resolve().parents[2] / "resources"
+JOB_GB, JOB_THREADS = 12, 16      # one sample at a time needs ~12 GB (GetOrganelle 1-5 GB, MitoM on SPAdes 2-8 GB)
+
+
+def log(msg):
+    import time
+    print(f"[nuclear {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def default_jobs(threads=JOB_THREADS):
+    """samples at a time from what the machine has now: memory (MemAvailable) and cores, 1-4"""
+    gb = 0
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                gb = int(line.split()[1]) / 1e6
+    except OSError:
+        pass
+    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    return max(1, min(4, int(gb // JOB_GB) if gb else 4, cores // threads))
 GENES = {"rdna": ["18S", "ITS1", "5.8S", "ITS2", "28S"], "histone": ["H1", "H2A", "H2B", "H3", "H4"]}
 # bowtie2 options for GetOrganelle's seed reads: histone DNA of another family is too far from the bundled seed for
 # end-to-end mapping (HNP1sub, a Pisione: 391 bytes of seed reads, "Too few seed reads", no result; local
@@ -37,6 +64,7 @@ GENES = {"rdna": ["18S", "ITS1", "5.8S", "ITS2", "28S"], "histone": ["H1", "H2A"
 BOWTIE2 = {"rdna": "--very-fast -t", "histone": "--very-sensitive-local -t"}
 SEEDS = {"rdna": (RES / "rdna" / "seed.fasta", RES / "rdna" / "label.fasta"),
          "histone": (RES / "histone" / "seed.fasta", RES / "histone" / "label.fasta")}
+CORE = {"rdna": ["18S", "5.8S", "28S"], "histone": ["H2A", "H2B", "H3", "H4"]}
 COLS = ["sample", "marker", "gene", "getorganelle_nt", "getorganelle_partial", "getorganelle_class", "spades_nt",
         "spades_partial", "spades_class", "overlap_nt", "mismatches", "indel_nt", "identity_pct", "verdict"]
 
@@ -61,9 +89,47 @@ def reads_per_file(r1, gb: float) -> int:
     return int(gb * 1e9 / 2 / max(tot / max(n, 1), 1))
 
 
-def is_complete(fasta) -> bool:
-    """the whole tandem unit: GetOrganelle closed it into a circle"""
+def is_circular(fasta) -> bool:
     return bool(fasta) and any(x.startswith(">") and "circular" in x for x in open(fasta))
+
+
+def label_gene(name: str, kind: str):
+    """gene of a label / seed sequence from its header: rDNA '18SribosomalRNA ...', histones 'H3|sample|...' or an
+    NCBI title 'histone H3 (H3) gene'; None for whole-cluster records and unnamed genes"""
+    first = name.split()[0]
+    if kind == "rdna":
+        return next((g for g in ("5.8S", "18S", "28S") if first.startswith(g)), None)
+    m = re.match(r"(H1|H2A|H2B|H3|H4)\|", first) or re.search(r"histone (H1|H2A|H2B|H3|H4)\b", name)
+    return m.group(1) if m and "cluster" not in name and name.count("histone") <= 1 else None
+
+
+def genes_covered(fasta, label, kind, blastn="blastn"):
+    """{gene: best label coverage %} of the result: how much of each gene it holds (blastn qcovs of the labels)"""
+    if not fasta:
+        return {}
+    out = subprocess.run([blastn, "-query", str(label), "-subject", str(fasta), "-evalue", "1e-5",
+                          "-outfmt", "6 qseqid qcovs"], capture_output=True, text=True).stdout
+    names = {}
+    for line in open(label):
+        if line.startswith(">"):
+            names[line[1:].split()[0]] = line[1:].strip()
+    cov = {}
+    for line in out.splitlines():
+        q, c = line.split("\t")
+        g = label_gene(names.get(q, q), kind)
+        if g:
+            cov[g] = max(cov.get(g, 0), int(c))
+    return cov
+
+
+def is_complete(fasta, kind=None, label=None, blastn="blastn", cov=None) -> bool:
+    """the whole tandem unit: circular, or every core gene covered end to end by a label (module doc)"""
+    if is_circular(fasta):
+        return True
+    if not fasta or not kind:
+        return False
+    cov = cov if cov is not None else genes_covered(fasta, label or SEEDS[kind][1], kind, blastn)
+    return all(cov.get(g, 0) >= 95 for g in CORE[kind])
 
 
 def label_bp(fasta, label, blastn="blastn") -> int:
@@ -112,7 +178,9 @@ def getorganelle(kind, r1, r2, out, threads=16, max_gb=(5, 10), seed=None, label
         d = out / f"round{k}"
         if k == 1 and given and result_fasta(given):
             keep(Path(given), d)
-            hist.append((k, f"given ({given})", "", result_fasta(d), label_bp(result_fasta(d), label, blastn)))
+            f = result_fasta(d)
+            hist.append((k, f"given ({given})", "", f, label_bp(f, label, blastn),
+                         genes_covered(f, label, kind, blastn)))
         elif r1 and Path(r1).exists():
             cap = reads_per_file(r1, gb)
             cmd = [exe, "-1", str(r1), "-2", str(r2), "-o", str(d), "-F", "anonym", "-s", str(prev or seed),
@@ -120,57 +188,70 @@ def getorganelle(kind, r1, r2, out, threads=16, max_gb=(5, 10), seed=None, label
                    "--max-reads", str(cap), "--reduce-reads-for-coverage", "inf", "--overwrite",
                    "--bowtie2-options", BOWTIE2[kind]]
             d.mkdir(parents=True, exist_ok=True)
-            with open(d / "getorganelle.stdout", "w") as log:
-                rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, env=env).returncode
-            # + the unzipped reads and their index, which GetOrganelle deletes itself only when it finishes
-            temp = list(d.glob("[0-9]-*.fastq")) + list(d.glob("*temp.indices*"))
-            for x in list(d.glob("extended_*.fq")) + temp + [d / "extended_spades", d / "seed"]:
-                shutil.rmtree(x, ignore_errors=True) if x.is_dir() else x.unlink(missing_ok=True)
+            seed_how = f"round {k - 1}" if prev else "bundled"
+            log(f"{out.parent.name}/{out.name}: {kind} round {k}, {gb} Gb, seed {seed_how}")
+            with open(d / "getorganelle.stdout", "w") as fh:
+                rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
+            clean(d)
             f = result_fasta(d)
             hist.append((k, f"{gb} Gb ({cap} reads per file), seed {'round ' + str(k - 1) if prev else 'bundled'}",
-                         rc, f, label_bp(f, label, blastn)))
+                         rc, f, label_bp(f, label, blastn), genes_covered(f, label, kind, blastn)))
         else:
             break
         top = max(h[4] for h in hist)
-        if hist[-1][3] and hist[-1][4] >= 0.9 * top:
+        if hist[-1][3] and hist[-1][4] > 0 and hist[-1][4] >= 0.9 * top:
             prev = hist[-1][3]                      # the next round grows the best result, not a stray one
-        if is_complete(hist[-1][3]) and hist[-1][4] >= 0.9 * top:
+        if is_complete(hist[-1][3], kind, cov=hist[-1][5]) and hist[-1][4] > 0 and hist[-1][4] >= 0.9 * top:
             break
     done = [h for h in hist if h[3] and h[4]]
     top = max((h[4] for h in done), default=0)
-    best = next((h for h in done if is_complete(h[3]) and h[4] >= 0.9 * top),
+    best = next((h for h in done if is_complete(h[3], kind, cov=h[5]) and h[4] >= 0.9 * top),
                 max(done, key=lambda h: h[4]) if done else None)
+    if not hist or (not best and all(h[2] not in ("", 0) for h in hist)):
+        raise RuntimeError(f"{kind}: no reads and no given assembly" if not hist else
+                           f"{kind}: GetOrganelle failed in every round (exit {[h[2] for h in hist]}); see "
+                           f"{out}/round*/getorganelle.stdout")          # no `done` stamp: the next run tries again
+    out.mkdir(parents=True, exist_ok=True)
     if best:
         keep(best[3].parent, out)
     with open(out / "rounds.tsv", "w") as fh:
-        fh.write("round\treads\texit\tresult\tlabel_bp\tcomplete\tchosen\n")
-        for k, how, rc, f, bp in hist:
+        fh.write("round\treads\texit\tresult\tlabel_bp\tgenes_covered_pct\tcircular\tcomplete\tchosen\n")
+        for k, how, rc, f, bp, cov in hist:
             chosen = best is not None and k == best[0]
-            fh.write(f"{k}\t{how}\t{rc}\t{f.name if f else ''}\t{bp}\t{is_complete(f)}\t{chosen}\n")
-    (out / "done").write_text(f"round {best[0]}: {best[3].name}, complete {is_complete(best[3])}\n" if best
-                              else "no result\n")
+            genes = ",".join(f"{g}:{cov.get(g, 0)}" for g in CORE[kind] + (["H1"] if kind == "histone" else []))
+            fh.write(f"{k}\t{how}\t{rc}\t{f.name if f else ''}\t{bp}\t{genes}\t{is_circular(f)}\t"
+                     f"{is_complete(f, kind, cov=cov)}\t{chosen}\n")
+    (out / "done").write_text(f"round {best[0]}: {best[3].name}, complete {is_complete(best[3], kind, cov=best[5])}, "
+                              f"circular {is_circular(best[3])}\n" if best else "no result\n")
     return result_fasta(out) if best else None
 
 
 # ── annotation ─────────────────────────────────────────────────────────────
 def mitom_version(mitom: Path) -> str:
+    """git commit of the MitoM checkout; for a plain copy the size and time of mito_nuc.py"""
     r = subprocess.run(["git", "-C", str(mitom), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
-    return r.stdout.strip() or "unknown"
+    if r.stdout.strip():
+        return r.stdout.strip()
+    f = Path(mitom) / "mito_nuc.py"
+    return f"mito_nuc.py:{f.stat().st_size}:{int(f.stat().st_mtime)}" if f.exists() else "unknown"
 
 
 def annotate(fasta, out, kind, sample, mitom, python=sys.executable, threads=4, gbf=True):
     """`mitom nuc annotate --genes <kind>` into out/; out/<sample>.<kind>.gbf (GetOrganelle results). Skipped when
     out/mitom.version is this MitoM's commit; returns the consensus line of MitoM's log."""
     out, mitom = Path(out), Path(mitom)
-    ver = mitom_version(mitom)
+    st = Path(fasta).stat()
+    ver = f"{mitom_version(mitom)} input:{st.st_size}:{int(st.st_mtime)}"   # redone when MitoM or the input changed
     stamp = out / "mitom.version"
-    if not (stamp.exists() and stamp.read_text().strip() == ver and (out / "consensus.tsv").exists()):
+    old = stamp.read_text().strip() if stamp.exists() else ""
+    if not (old in (ver, ver.split(" ")[0]) and (out / "consensus.tsv").exists()):
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True)
         env = dict(os.environ, PATH=f"{Path(python).parent}{os.pathsep}{os.environ['PATH']}")
-        with open(out / "mitom_nuc.log", "w") as log:
+        log(f"{sample}: MitoM {kind} on {Path(fasta).name} -> {out.parent.name}/{out.name}")
+        with open(out / "mitom_nuc.log", "w") as fh:
             subprocess.run([str(python), str(mitom / "mitom"), "nuc", "annotate", "-i", str(fasta), "-o", str(out),
-                            "--genes", kind, "--threads", str(threads)], stdout=log, stderr=subprocess.STDOUT,
+                            "--genes", kind, "--threads", str(threads)], stdout=fh, stderr=subprocess.STDOUT,
                            env=env, check=True)
         stamp.write_text(ver + "\n")
     if gbf and (out / "nuc_annotation.gb").exists():
@@ -191,7 +272,7 @@ def consensus(d):
         if f.exists():
             seq = str(next(SeqIO.parse(str(f), "fasta")).seq).upper()
             part = "/".join(x for x, k in (("5'", "partial_5"), ("3'", "partial_3")) if r.get(k) == "1")
-            out[r["gene"]] = (seq, part, r.get("class", ""))
+            out.setdefault(r["gene"], (seq, part, r.get("class", "")))   # first organism = first record
     return out
 
 
@@ -226,11 +307,15 @@ def compare(sample, kind, go_dir, spades_dir):
             if g in d:
                 r.update({f"{k}_nt": len(d[g][0]), f"{k}_partial": d[g][1], f"{k}_class": d[g][2]})
         if g in go and g in sp:
-            cols, mis, indel = overlap(go[g][0], sp[g][0])
+            a, b = go[g][0], sp[g][0]
+            cols, mis, indel = overlap(a, b)
+            short = min(len(a), len(b))
+            # free end gaps: unrelated sequences align over a few bases with 0 mismatches - the shorter sequence
+            # must be covered over >= 90 % of its length before "identical" / "contained" means anything
             r.update(overlap_nt=cols, mismatches=mis, indel_nt=indel,
-                     identity_pct=f"{100 * (cols - mis) / max(cols + indel, 1):.2f}",
-                     verdict="differ" if mis or indel else "identical" if len(go[g][0]) == len(sp[g][0])
-                     else "contained")
+                     identity_pct=f"{100 * (cols - mis) / max(short, 1):.2f}",
+                     verdict="no overlap" if cols < 0.5 * short else "differ" if mis or indel or cols < 0.9 * short
+                     else "identical" if len(a) == len(b) else "contained")
         else:
             r["verdict"] = "only GetOrganelle" if g in go else "only SPAdes-MitoM"
         rows.append(r)
@@ -272,6 +357,11 @@ def one_sample(job):
     s, p, a = job["sample"], job["paths"], job["args"]
     out, lines, rows = Path(a.outdir), [], []
     try:
+        # MitoM on the SPAdes scaffolds once for both markers (hours on a 2 Gb assembly; it was run per marker
+        # before: spades_mitom/<s> at the top, a per-marker <kind>/spades_mitom/<s> of an earlier run is reused)
+        scaffolds = p["scaffolds"] if p["scaffolds"].exists() and p["scaffolds"].stat().st_size else None
+        workflow_run = p.get("spades_mitom") if p.get("spades_mitom") and Path(p["spades_mitom"]).exists() else None
+        shared = None
         for kind in a.markers:
             go_dir = out / kind / "getorganelle" / s
             # an assembly the results directory already has (rDNA) is round 1
@@ -279,14 +369,21 @@ def one_sample(job):
                                  given=p.get(kind), exe=a.getorganelle)
             ann = out / kind / "annotation" / s
             got = annotate(fasta, ann, kind, s, a.mitom, a.mitom_python) if fasta else "no GetOrganelle result"
-            sp = p.get("spades_mitom") if p.get("spades_mitom") and Path(p["spades_mitom"]).exists() else None
-            if not sp and p["scaffolds"].exists():
-                sp = out / kind / "spades_mitom" / s
-                annotate(p["scaffolds"], sp, kind, s, a.mitom, a.mitom_python, threads=12, gbf=False)
+            legacy = out / kind / "spades_mitom" / s
+            sp = workflow_run or (legacy if (legacy / "mitom.version").exists() else None)
+            if not sp and scaffolds:
+                if shared is None:
+                    shared = out / "spades_mitom" / s
+                    annotate(scaffolds, shared, ",".join(a.markers), s, a.mitom, a.mitom_python, threads=12,
+                             gbf=False)
+                sp = shared
             rows += compare(s, kind, ann if fasta else None, sp)
             lines.append(f"{s} {kind}: GetOrganelle {got}" + ("" if sp else " (no SPAdes assembly)"))
-    except Exception as e:      # one sample failing must not stop the batch; reported
+            note = (go_dir / "done").read_text().strip() if (go_dir / "done").exists() else "no GetOrganelle run"
+            log(f"{s}: {kind} done ({note})")
+    except Exception as e:      # one sample failing must not stop the batch; reported, and a row in summary.tsv
         lines.append(f"{s}: error: {type(e).__name__}: {e}")
+        rows.append({"sample": s, "marker": kind, "gene": "", "verdict": f"error: {type(e).__name__}: {e}"[:200]})
     return lines, rows
 
 
@@ -299,9 +396,36 @@ rdna/ histone/
   getorganelle/<样本>/  GetOrganelle 组装（*.path_sequence.fasta、*.selected_graph.gfa、get_org.log.txt）
   annotation/<样本>/    MitoM 注释：<样本>.rdna.gbf / <样本>.histone.gbf（GenBank），nuc_features.tsv，
                         consensus/（每个基因一条序列），genes/（每个拷贝），submission/（NCBI table2asn）
-  spades_mitom/<样本>/  MitoM 对 SPAdes 全基因组组装的注释（有 SPAdes 的样本）
+spades_mitom/<样本>/    MitoM 对 SPAdes 全基因组组装的注释，rDNA 与组蛋白一次完成（有 SPAdes 的样本）
 组蛋白类别：replication-dependent 串联基因簇拷贝 | replacement 替换变体（H3.3、含内含子）| single-copy 单拷贝
 """
+
+
+def status(out, markers=("rdna", "histone"), samples=None):
+    """What is done per sample, from the files (works while a batch runs): one line per sample"""
+    out = Path(out)
+    names = samples or sorted({d.name for k in markers for sub in ("getorganelle", "annotation")
+                               for d in (out / k / sub).glob("*") if d.is_dir()})
+    done = {}
+    if (out / "summary.tsv").exists():
+        for r in csv.DictReader(open(out / "summary.tsv"), delimiter="\t"):
+            done.setdefault((r["sample"], r["marker"]), []).append(r["verdict"])
+    lines = []
+    for s in names:
+        parts = []
+        for k in markers:
+            g, ann = out / k / "getorganelle" / s / "done", out / k / "annotation" / s / "mitom.version"
+            sp = next((d for d in (out / k / "spades_mitom" / s, out / "spades_mitom" / s)
+                       if (d / "mitom.version").exists()), out / "none")
+            sp = sp / "mitom.version"
+            v = done.get((s, k), [])
+            step = ("error" if any(x.startswith("error") for x in v) else "compared" if v else
+                    "annotated" if ann.exists() else "assembled" if g.exists()
+                    else "started" if (out / k / "getorganelle" / s).exists() else "waiting")
+            parts.append(f"{k} {step}" + (" +spades" if sp.exists() else "")
+                         + (f" [{', '.join(sorted({x[:40] for x in v}))}]" if v else ""))
+        lines.append(f"{s:16s} " + " | ".join(parts))
+    return lines
 
 
 def batch(a):
@@ -309,25 +433,32 @@ def batch(a):
     if a.samples:
         keep = set(a.samples.split(","))
         samples = {s: p for s, p in samples.items() if s in keep}
-    print(f"[nuclear] {a.results}: layout {name}, {len(samples)} sample(s), markers {','.join(a.markers)}, "
-          f"MitoM {mitom_version(a.mitom)}", flush=True)
+    jobs = a.jobs or default_jobs(a.threads)
+    log(f"{a.results}: layout {name}, {len(samples)} sample(s), markers {','.join(a.markers)}, "
+        f"MitoM {mitom_version(a.mitom)}, {jobs} sample(s) at a time x {a.threads} threads")
     out = Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "README.txt").write_text(README)
-    rows = []
-    with ProcessPoolExecutor(max_workers=max(1, a.jobs)) as ex:
-        for lines, r in ex.map(one_sample, [{"sample": s, "paths": p, "args": a} for s, p in samples.items()]):
-            print("\n".join(lines), flush=True)
-            rows += r
-    old = []                                            # keep rows of samples not run this time
+    old = []                                            # rows of samples not run this time stay
     if (out / "summary.tsv").exists():
         old = [r for r in csv.DictReader(open(out / "summary.tsv"), delimiter="\t") if r["sample"] not in samples]
-    write_rows(out / "summary.tsv", sorted(old + rows, key=lambda r: (r["sample"], r["marker"])))
+    rows, n_done = [], 0
+    from concurrent.futures import as_completed
+    with ProcessPoolExecutor(max_workers=jobs) as ex:
+        futures = [ex.submit(one_sample, {"sample": s, "paths": p, "args": a}) for s, p in samples.items()]
+        for fut in as_completed(futures):
+            lines, r = fut.result()
+            rows += r
+            n_done += 1
+            print("\n".join(lines), flush=True)
+            # summary.tsv after every sample: progress is visible, a stopped batch keeps what it had
+            write_rows(out / "summary.tsv", sorted(old + rows, key=lambda r: (r["sample"], r["marker"])))
+            log(f"{n_done}/{len(samples)} samples done -> {out / 'summary.tsv'}")
     v = {}
     for r in rows:
         v[r["verdict"]] = v.get(r["verdict"], 0) + 1
-    print(f"[nuclear] {len(rows)} gene rows: " + ", ".join(f"{k} {n}" for k, n in sorted(v.items()))
-          + f" -> {out / 'summary.tsv'}")
+    log(f"{len(rows)} gene rows: " + ", ".join(f"{k} {n}" for k, n in sorted(v.items()))
+        + f" -> {out / 'summary.tsv'}")
 
 
 def main():
@@ -366,10 +497,17 @@ def main():
     b.add_argument("-o", "--outdir", required=True)
     b.add_argument("--samples", help="only these samples (comma-separated)")
     b.add_argument("--markers", default="rdna,histone")
-    b.add_argument("-j", "--jobs", type=int, default=3, help="samples at a time (GetOrganelle 16 threads each)")
+    b.add_argument("-j", "--jobs", type=int, default=0,
+                   help="samples at a time (default: from free memory and cores, 1-4; each ~12 GB, 16 threads)")
     b.add_argument("-t", "--threads", type=int, default=16)
     b.add_argument("--max-gb", default="5,10", help="Gb of reads per GetOrganelle round")
+    st = sub.add_parser("status", help="what a batch has done so far (from its output directory)")
+    st.add_argument("-o", "--outdir", required=True)
+    st.add_argument("--markers", default="rdna,histone")
     a = ap.parse_args()
+    if a.cmd == "status":
+        print("\n".join(status(a.outdir, a.markers.split(","))))
+        return
     if hasattr(a, "max_gb"):
         a.max_gb = [float(x) for x in a.max_gb.split(",") if x.strip()]
     if a.cmd == "assemble":

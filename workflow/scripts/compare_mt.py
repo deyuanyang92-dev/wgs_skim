@@ -100,6 +100,7 @@ def genes(gb, ref):
     """[(start, end, name, strand, type)] 0-based on ref from a GenBank file (gene / CDS / tRNA / rRNA / D-loop / misc_feature);
     the annotated sequence may start elsewhere on the circle (shifted) but must be on the same strand."""
     out, cur, origin = [], None, []
+    cur_rank, known = {}, set()
     lines = open(gb).read().split("\n")
     if "ORIGIN" in [x.strip() for x in lines]:
         origin = lines[[x.strip() for x in lines].index("ORIGIN") + 1:]
@@ -117,9 +118,14 @@ def genes(gb, ref):
                 if pos:
                     cur = [min(pos) - 1, max(pos), m.group(1), -1 if "complement" in m.group(2) else 1, m.group(1)]
                     out.append(cur)
-        elif cur and re.search(r'/(gene|product|note)="', line) and cur[2] in ("gene", "CDS", "tRNA", "rRNA", "D-loop",
-                                                                           "misc_feature", "rep_origin"):
-            cur[2] = re.search(r'="([^"]*)', line).group(1)
+        elif cur:
+            q = re.search(r'/(gene|product|note)="([^"]*)', line)
+            if q:                                    # the first /gene wins over /product, which wins over /note
+                rank = {"gene": 0, "product": 1, "note": 2}[q.group(1)]
+                feature_types = ("gene", "CDS", "tRNA", "rRNA", "D-loop", "misc_feature", "rep_origin")
+                if rank <= cur_rank.get(id(cur), 3) and cur[2] in (*feature_types, *known):
+                    cur[2], cur_rank[id(cur)] = q.group(2), rank
+                    known.add(q.group(2))
     n = len(gseq) or len(ref)
     seen, res = set(), []
     for a, b, name, strand, typ in out:              # gene + CDS of the same gene: keep the first
@@ -478,13 +484,17 @@ def batch(jobs, out, threads, only=None, plot=True):
             print(f"{j['sample']}: skipped (missing: {', '.join(miss)})")
         else:
             todo.append(j)
+    from concurrent.futures import as_completed
     with ProcessPoolExecutor(max_workers=max(1, threads)) as ex:
-        for s, d, lines, st, g in ex.map(run_job, todo, [out] * len(todo)):
+        futures = [ex.submit(run_job, j, out) for j in todo]
+        for fut in as_completed(futures):
+            s, d, lines, st, g = fut.result()
             summaries += s
             diffs += d
             structs += st
             gene_rows += g
             print("\n".join(lines), flush=True)
+            write_tables(out, "all", summaries, diffs, structs, gene_rows)   # kept if the batch stops
     order = {j["sample"]: i for i, j in enumerate(jobs)}
     summaries.sort(key=lambda r: order.get(r["sample"], 0))
     for rows in (diffs, structs, gene_rows):

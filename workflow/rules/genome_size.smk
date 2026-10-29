@@ -8,7 +8,7 @@ rule jellyfish:
         k=config["kmer_size"],
         jf=lambda w, output: str(Path(output.histo).parent / "reads.jf"),
     resources:
-        mem_mb=64000,
+        mem_mb=12000,
     log:
         f"{OUT}logs/jellyfish/{{sample}}.log",
     benchmark:
@@ -34,8 +34,12 @@ rule genomescope:
         out=lambda w, output: str(Path(output.summary).parent / "genomescope"),
         k=config["kmer_size"],
         ploidy=config["ploidy"],
+    resources:
+        mem_mb=2000,
     log:
         f"{OUT}logs/genomescope/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/genomescope/{{sample}}.tsv"
     conda:
         "../envs/genome_size.yaml"
     shell:

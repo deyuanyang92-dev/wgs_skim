@@ -59,6 +59,16 @@ def snakemake_exe():
     return exe
 
 
+def user_config_keys(args):
+    """keys set in ~/.wgs_skim/config.yaml or --configfile: the command line must not override them silently"""
+    import yaml
+    keys = set()
+    for f in [USER_CONFIG] + ([Path(args.configfile)] if getattr(args, "configfile", None) else []):
+        if Path(f).is_file():
+            keys |= set((yaml.safe_load(Path(f).read_text()) or {}).keys())
+    return keys
+
+
 def base_cmd(args, extra_config):
     root = workflow_root()
     cmd = [snakemake_exe(), "-s", str(root / "workflow" / "Snakefile"),
@@ -67,10 +77,23 @@ def base_cmd(args, extra_config):
         cmd += ["--configfile", str(USER_CONFIG)]
     if getattr(args, "configfile", None):
         cmd += ["--configfile", str(Path(args.configfile).resolve())]
-    cfg = [f"{k}={v}" for k, v in extra_config.items() if v not in (None, "")] + (getattr(args, "config", None) or [])
+    given = user_config_keys(args)                  # defaults the user wrote there win over our defaults (db_dir)
+    cfg = [f"{k}={v}" for k, v in extra_config.items() if v not in (None, "") and not (k == "db_dir" and k in given)]
+    cfg += getattr(args, "config", None) or []
     if cfg:
         cmd += ["--config", *cfg]
     return cmd
+
+
+def machine_mem_gb():
+    """total memory of this machine (GB), 0 if unknown"""
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) / 1e6
+    except OSError:
+        pass
+    return 0
 
 
 def cmd_run(args, passthrough):
@@ -84,6 +107,9 @@ def cmd_run(args, passthrough):
             "busco_lineage": args.busco_lineage, "steps": args.steps,
             "blast_mt": args.blast_mt, "blast_nr": args.blast_nr}
     cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
+    mem = args.mem_gb or int(machine_mem_gb() * 0.9)
+    if mem:                                           # every rule declares mem_mb: jobs are scheduled by memory too
+        cmd += ["--resources", f"mem_mb={int(mem * 1024)}"]
     if args.dry_run:
         cmd.append("-n")
     cmd += passthrough
@@ -104,12 +130,19 @@ def cmd_install(args, passthrough):
     print(f"[wgs_skim] creating environments in {args.conda_prefix} (first time: 20-60 min)\n"
           f"[wgs_skim] {shlex.join(cmd)}", flush=True)
     rc = subprocess.run(cmd, cwd=str(root)).returncode
+    if rc == 0:                                       # databases every run needs: MitoM, MITOS2 refs, GetOrganelle
+        cmd = base_cmd(args, {"reads_dir": tmp / "reads", "outdir": ".", "db_dir": HOME / "db"}) + \
+            ["-d", str(tmp), "--cores", "2", "mitom_db", "mitom_nuc_db", "getorganelle_db"] + passthrough
+        print(f"[wgs_skim] fetching MitoM and the GetOrganelle / MITOS2 databases into {HOME / 'db'}", flush=True)
+        rc = subprocess.run(cmd, cwd=str(root)).returncode
     if rc == 0:
-        print("[wgs_skim] all environments ready")
+        print("[wgs_skim] all environments and databases ready")
     return rc
 
 
 def cmd_samples(args, passthrough):
+    if not (args.reads_dir or args.samples):
+        sys.exit("[wgs_skim] give the reads directory or a sample sheet: wgs_skim samples -r DIR | -s sheet.tsv")
     sys.path.insert(0, str(workflow_root() / "workflow" / "scripts"))
     from samples import find_pairs, read_sheet
     pairs = read_sheet(args.samples) if args.samples else find_pairs(args.reads_dir)
@@ -159,6 +192,9 @@ def cmd_compare(args, passthrough):
 def cmd_nuclear(args, passthrough):
     """rDNA + histones of every sample of a results directory; see workflow/scripts/nuclear_markers.py."""
     prefix = Path(args.conda_prefix)
+    if not args.results and not args.status:
+        sys.exit("[wgs_skim] give the results directory: wgs_skim nuclear --results DIR -o OUT")
+
     def env_with(*tools):                       # an environment of the workflow (or the user's) that has the tools
         for d in sorted(prefix.glob("*/")) + sorted((Path.home() / "miniforge3" / "envs").glob("*/")):
             if all((d / "bin" / t).exists() for t in tools):
@@ -169,7 +205,10 @@ def cmd_nuclear(args, passthrough):
     mitom = Path(args.mitom) if args.mitom else HOME / "db" / "mitom_nuc" / "Mitom"
     if not (mitom / "mito_nuc.py").exists():
         sys.exit(f"[wgs_skim] {mitom}: no MitoM with `mitom nuc` (--mitom, or run the workflow once)")
-    cmd = [str(py), str(workflow_root() / "workflow" / "scripts" / "nuclear_markers.py"), "batch",   # Biopython
+    nm = str(workflow_root() / "workflow" / "scripts" / "nuclear_markers.py")
+    if args.status:
+        return subprocess.run([str(py), nm, "status", "-o", args.outdir, "--markers", args.markers]).returncode
+    cmd = [str(py), nm, "batch",                     # MitoM's python: Biopython for the comparison
            "--results", args.results, "-o", args.outdir, "--markers", args.markers, "-j", str(args.jobs),
            "--mitom", str(mitom), "--mitom-python", str(py), "--getorganelle", str(go)]
     cmd += (["--samples", args.samples] if args.samples else []) + ["--max-gb", args.max_gb]
@@ -201,15 +240,20 @@ def main(argv=None):
 
     r = sub.add_parser("run", help="run the workflow", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     r.add_argument("-r", "--reads_dir", help="directory of paired FASTQ files (sample names detected automatically)")
-    r.add_argument("-s", "--samples", help="sample sheet instead of -r: TSV/CSV with sample, fastq_1, fastq_2")
+    r.add_argument("-s", "--samples", help="sample sheet instead of -r: TSV/CSV with sample, fastq_1, fastq_2 "
+                   "[, scaffolds: an existing SPAdes assembly to use instead of assembling]")
     r.add_argument("-o", "--outdir", help="results directory (default: <reads_dir>/../wgs_skim_results)")
     r.add_argument("-t", "--taxon", choices=TAXA, help="taxon preset (default annelid)")
     r.add_argument("-j", "--cores", type=int, default=os.cpu_count(), help="CPU cores to use")
+    r.add_argument("--mem-gb", type=int, default=0,
+                   help="memory the jobs may use together (default: 90%% of the machine); every rule declares "
+                        "its need, SPAdes from the data size")
     r.add_argument("-n", "--dry-run", action="store_true", help="only show what would be run")
     r.add_argument("--steps", metavar="STEP[,STEP]",
                    help="run only these steps (and what they need): fastp, meangs, mito (MEANGS + GetOrganelle), "
-                        "getorganelle (without MEANGS), nr, spades, busco, genome_size, annotate, topology, blast, "
-                        "summary (default: everything)")
+                        "getorganelle (without MEANGS), nr (rDNA + histones), spades, busco, genome_size, annotate, "
+                        "topology, blast, nuclear (rDNA + histones in the SPAdes assembly, copy numbers, vs "
+                        "GetOrganelle), summary (default: everything)")
     r.add_argument("--blast-db", help="local nt database prefix (default: NCBI online BLAST)")
     r.add_argument("--blast-mt", metavar="Q[,Q]",
                    help="mitogenome BLAST queries: full and/or genes, e.g. cox1,16s,cytb (default cox1)")
@@ -255,15 +299,17 @@ def main(argv=None):
     m.set_defaults(func=cmd_compare)
 
     n = sub.add_parser("nuclear", help="rDNA + histones of a results directory: GetOrganelle, MitoM .gbf, vs SPAdes")
-    n.add_argument("--results", required=True, help="results directory (wgs_skim or wgs_skim_pipeline layout)")
+    n.add_argument("--results", default="", help="results directory (wgs_skim or wgs_skim_pipeline layout)")
     n.add_argument("-o", "--outdir", default="nuclear_markers")
     n.add_argument("--samples", help="only these samples (comma-separated)")
     n.add_argument("--markers", default="rdna,histone")
-    n.add_argument("-j", "--jobs", type=int, default=3, help="samples at a time (GetOrganelle 16 threads each)")
+    n.add_argument("-j", "--jobs", type=int, default=0,
+                   help="samples at a time (default: from free memory and cores, 1-4; ~12 GB and 16 threads each)")
     n.add_argument("--max-gb", default="5,10", help="Gb of reads per GetOrganelle round (round 2, seeded with "
                    "round 1, only when round 1 does not close the unit)")
     n.add_argument("--mitom", help="MitoM checkout (default: the workflow's, <WGS_SKIM_HOME>/db/mitom_nuc/Mitom)")
     n.add_argument("--conda-prefix", default=default_conda_prefix(), help="where the software environments are")
+    n.add_argument("--status", action="store_true", help="only show what the batch in -o has done so far")
     n.set_defaults(func=cmd_nuclear)
 
     b = sub.add_parser("build-blastdb", help="build a fast marker BLAST database (Metazoa, <= 50 kb) from local nt")

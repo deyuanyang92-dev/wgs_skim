@@ -9,6 +9,7 @@ rule getorganelle_nr:
     input:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
+        json=rules.fastp.output.json,
         seed=NR_SEED,
         label=NR_LABEL,
     output:
@@ -20,6 +21,8 @@ rule getorganelle_nr:
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
         gb=config["nuclear_max_gb"],
+    resources:
+        mem_mb=NUC_MEM,
     log:
         f"{OUT}logs/getorganelle_nr/{{sample}}.log",
     benchmark:
@@ -42,15 +45,19 @@ rule nr_annotate:
     from NCBI records; per Mitom's benchmark 92.6 % of boundaries within 5 nt)."""
     input:
         fasta=rules.getorganelle_nr.output.fasta,
-        db=MITOM_NUC_DB,
+        db=[] if config["mitom_dir"] else MITOM_NUC_DB,
     output:
         gb=f"{OUT}rdna/{{sample}}/{{sample}}.rdna.gbf",
         tsv=f"{OUT}rdna/{{sample}}/{{sample}}.nr_features.tsv",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom_nuc"),
-        mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
+        mitom=lambda w, input: config["mitom_dir"] or f"{MITOM_NUC_DB}/Mitom",
+    resources:
+        mem_mb=2000,
     log:
         f"{OUT}logs/nr_annotate/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/nr_annotate/{{sample}}.tsv"
     threads: 4
     conda:
         "../envs/mitom.yaml"
@@ -71,13 +78,15 @@ rule nuc_markers:
     and histones (H1, H2A, H2B, H3, H4); every copy plus one consensus per gene (contigs used / dropped and why)."""
     input:
         scaffolds=rules.spades.output.scaffolds,
-        db=MITOM_NUC_DB,
+        db=[] if config["mitom_dir"] else MITOM_NUC_DB,
     output:
         features=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_features.tsv",
         consensus=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_consensus.tsv",
     params:
         wd=lambda w, output: str(Path(output.features).parent / "mitom_nuc"),
-        mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
+        mitom=lambda w, input: config["mitom_dir"] or f"{MITOM_NUC_DB}/Mitom",
+    resources:
+        mem_mb=8000,
     log:
         f"{OUT}logs/nuc_markers/{{sample}}.log",
     benchmark:
@@ -107,8 +116,12 @@ rule nuc_copies:
         tsv=f"{OUT}nuclear/{{sample}}/{{sample}}.copy_number.tsv",
     params:
         busco_dir=lambda w, input: str(Path(input.busco).parent / "busco"),
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/nuc_copies/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/nuc_copies/{{sample}}.tsv"
     conda:
         "../envs/python.yaml"
     script:
@@ -121,6 +134,7 @@ rule getorganelle_histone:
     input:
         r1=rules.fastp.output.r1,
         r2=rules.fastp.output.r2,
+        json=rules.fastp.output.json,
         seed=HIST_SEED,
         label=HIST_LABEL,
     output:
@@ -132,6 +146,8 @@ rule getorganelle_histone:
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
         gb=config["nuclear_max_gb"],
+    resources:
+        mem_mb=NUC_MEM,
     log:
         f"{OUT}logs/getorganelle_histone/{{sample}}.log",
     benchmark:
@@ -154,21 +170,26 @@ rule histone_annotate:
     classed replication-dependent (cluster) / replacement (H3.3, introns) / single-copy."""
     input:
         fasta=rules.getorganelle_histone.output.fasta,
-        db=MITOM_NUC_DB,
+        db=[] if config["mitom_dir"] else MITOM_NUC_DB,
     output:
         gb=f"{OUT}histone/{{sample}}/{{sample}}.histone.gbf",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom_nuc"),
         nm=str(Path(workflow.basedir) / "scripts" / "nuclear_markers.py"),
-        mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
+        mitom=lambda w, input: config["mitom_dir"] or f"{MITOM_NUC_DB}/Mitom",
+    resources:
+        mem_mb=2000,
     log:
         f"{OUT}logs/histone_annotate/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/histone_annotate/{{sample}}.tsv"
     threads: 4
     conda:
         "../envs/mitom.yaml"
     shell:
         """
         if [ ! -s {input.fasta} ]; then echo "no histone cluster" > {log}; : > {output.gb}; exit 0; fi
+        rm -rf {params.wd}
         python {params.nm} annotate -i {input.fasta} -o {params.wd} --kind histone --sample {wildcards.sample} \
             --mitom {params.mitom} -t {threads} > {log} 2>&1
         cp {params.wd}/{wildcards.sample}.histone.gbf {output.gb}
@@ -188,8 +209,12 @@ rule nuc_compare:
         rdna=lambda w, input: str(Path(input.rdna).parent / "mitom_nuc" / "out"),
         histone=lambda w, input: str(Path(input.histone).parent / "mitom_nuc"),
         spades=lambda w, input: str(Path(input.spades).parent / "mitom_nuc"),
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/nuc_compare/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/nuc_compare/{{sample}}.tsv"
     conda:
         "../envs/mitom.yaml"
     shell:

@@ -20,13 +20,20 @@ raw reads ─ fastp ─┬─ MEANGS seed ─ GetOrganelle mitogenome ─ not ci
 git clone https://github.com/deyuanyang92-dev/wgs_skim.git && cd wgs_skim
 conda env create -f environment.yml && conda activate wgs_skim
 pip install .
-wgs_skim install                 # 自动安装 GetOrganelle、MEANGS、SPAdes、BUSCO、MitoM 等全部软件（各自独立的 conda 环境）
+wgs_skim install                 # 自动安装 GetOrganelle、MEANGS、SPAdes、BUSCO、MitoM 等全部软件（各自独立的 conda 环境）及数据库
 
 # 2. 运行：只给原始数据目录，样品名自动识别
 wgs_skim run -r /path/to/rawdata                     # 默认环节动物
 wgs_skim run -r /path/to/rawdata --taxon mollusc     # 螺类 / 贝类；fish 鱼类；crustacean 甲壳类
 wgs_skim run -r /path/to/rawdata --steps fastp,spades,busco   # 只跑某几步（自动带上依赖的上游步骤）
 wgs_skim run -r /path/to/rawdata --steps getorganelle         # 只用 GetOrganelle 组装线粒体（不用 MEANGS 种子）
+wgs_skim run -r /path/to/rawdata --steps nr                   # 核 rDNA（18S-ITS-28S）+ 组蛋白基因簇，MitoM 注释成 .gbf
+wgs_skim run -r /path/to/rawdata --mem-gb 200 -j 64           # 限定内存 / 核数，Snakemake 按两者调度并行
+
+# 3. 对已有结果（含旧流程 Temp_scripts 的结果目录）
+wgs_skim nuclear --results results/ -o nuclear/               # 所有样本的 rDNA + 组蛋白：组装、注释、与 SPAdes 比较
+wgs_skim nuclear --status -o nuclear/                         # 查看批量进度（运行中也可以）
+wgs_skim compare --results results/ -o compare/               # GetOrganelle 与 SPAdes-MitoFinder 线粒体是否一致
 ```
 
 结果在 `<rawdata 上级目录>/wgs_skim_results/`，汇总表 `summary/samples.tsv`，报告 `summary/report.html`。
@@ -71,10 +78,11 @@ wgs_skim config > my.yaml                        # every option with comments; u
 | option | meaning | default |
 |---|---|---|
 | `-r, --reads_dir` | directory of paired FASTQ files (flat, or one sub-directory per sample) | – |
-| `-s, --samples` | sample sheet (TSV/CSV: `sample`, `fastq_1`, `fastq_2`) instead of `-r` | – |
+| `-s, --samples` | sample sheet (TSV/CSV: `sample`, `fastq_1`, `fastq_2`; optional `scaffolds` = an existing SPAdes assembly, linked instead of assembled) instead of `-r` | – |
 | `-o, --outdir` | results directory | `<reads_dir>/../wgs_skim_results` |
 | `-t, --taxon` | `annelid`, `mollusc`, `fish`, `crustacean` | `annelid` |
 | `-j, --cores` | CPU cores | all |
+| `--mem-gb` | memory all jobs may use together; each rule declares its need (SPAdes from the data size), so Snakemake runs as many jobs side by side as cores *and* memory allow | 90 % of the machine |
 | `-n, --dry-run` | show jobs only | off |
 | `--steps` | run only these steps, comma separated (see below) | all |
 | `--blast-db` | local nt database prefix | NCBI online BLAST |
@@ -131,10 +139,63 @@ they depend on run too, and finished ones are reused.
 | `genome_size` | jellyfish + GenomeScope2 | fastp |
 | `annotate` | MitoM annotation | mito |
 | `topology` | read-based circular / linear check | mito, annotate |
-| `blast` | BLAST + GenBank taxonomy of mitogenome and rDNA | mito, nr |
-| `summary` | summary table and report of what was run | – |
+| `blast` | BLAST + GenBank taxonomy of mitogenome and rDNA | mito, nr (+ annotate for gene queries) |
+| `nuclear` | rDNA + histones in the SPAdes assembly, copy numbers, comparison with the GetOrganelle units | spades, busco, nr |
+| `summary` | summary table and report; alone: of everything the results directory already has | – |
 
-Aliases: `qc`, `meangs-getorganelle`, `rdna`, `assembly`, `jellyfish`, `genomescope`, `mitom`, `report`.
+`nr` also assembles and annotates the histone cluster. Aliases: `qc`, `mitogenome` / `meangs-getorganelle` (mito),
+`rdna` / `histone` / `histones` (nr), `assembly` (spades), `jellyfish` / `genomescope` (genome_size), `mitom` / `mitoz`
+(annotate), `nuc` (nuclear), `report` (summary).
+
+### Recipes: one step for a whole batch
+
+Every command below works on a directory of raw reads of any number of samples (sample names from the file names),
+reuses what an earlier command in the same results directory already made, and writes one log per sample under
+`logs/<step>/`. Replace `-r rawdata/` by `-s samples.tsv` for a sample sheet.
+
+```bash
+# QC only (fastp): clean reads + fastp.html per sample
+wgs_skim run -r rawdata/ --steps fastp                   # -> qc/<sample>/<sample>.R1.fq.gz, .fastp.html/.json
+
+# SPAdes whole-genome assembly, then BUSCO on it
+wgs_skim run -r rawdata/ --steps spades                  # -> assembly/<sample>/<sample>.scaffolds.fasta
+wgs_skim run -r rawdata/ --steps busco                   # -> assembly/<sample>/<sample>.busco.txt (runs spades first)
+wgs_skim run -r rawdata/ --steps spades -- --set-threads spades=48 --set-resources spades:mem_mb=250000
+
+# mitogenome: MEANGS seed -> GetOrganelle -> reseeded rounds until circular (-> SPAdes scaffold if that closes)
+wgs_skim run -r rawdata/ --steps mito                    # -> mito/<sample>/<sample>.mt.fasta + .mt.json
+wgs_skim run -r rawdata/ --steps getorganelle            # the same with GetOrganelle's own animal_mt seeds, no MEANGS
+wgs_skim run -r rawdata/ --steps annotate                # + MitoM annotation -> annotation/<sample>/<sample>.mt.gb
+wgs_skim run -r rawdata/ --steps topology                # + read-based circular / linear check -> topology/
+
+# nuclear multi-copy markers: 18S-ITS-28S and the histone cluster (GetOrganelle, MitoM .gbf)
+wgs_skim run -r rawdata/ --steps nr                      # -> rdna/<sample>/<sample>.rdna.gbf, histone/<sample>/<sample>.histone.gbf
+wgs_skim run -r rawdata/ --steps nuclear                 # + the same genes in the SPAdes assembly, copy numbers,
+                                                         #   GetOrganelle vs SPAdes per gene -> nuclear/<sample>/
+
+# species check: COX1 and rDNA genes against nt, top hits with GenBank taxonomy
+wgs_skim run -r rawdata/ --steps blast --blast-db /db/blast_marker/metazoa_marker   # local (fast, see build-blastdb)
+wgs_skim run -r rawdata/ --steps blast --email you@example.com                      # NCBI online BLAST (slow)
+wgs_skim run -r rawdata/ --steps blast --blast-mt cox1,16s,cytb --blast-nr 18S,ITS,28S
+
+# genome size and heterozygosity (jellyfish + GenomeScope2)
+wgs_skim run -r rawdata/ --steps genome_size             # -> genome_size/<sample>/<sample>.genomescope.txt + plots
+
+# the report of everything made so far (one row per sample + HTML; with other steps: of those steps)
+wgs_skim run -r rawdata/ --steps summary                 # -> summary/samples.tsv, summary/report.html
+```
+
+Several steps at once: `--steps fastp,spades,busco`. Everything: no `--steps`. Only some samples: a sample sheet
+with those rows. Rerun one step after a change: `-- --forcerun busco`.
+
+Outside the workflow, on results made by other pipelines:
+
+```bash
+wgs_skim nuclear --results old_results/ -o nuclear/            # rDNA + histones of every sample (see above)
+wgs_skim compare --results old_results/ -o compare/            # GetOrganelle vs SPAdes-MitoFinder mitogenomes
+wgs_skim circularize -i <sample>_all_mt.fasta --spades spades/ # close MitoFinder / SPAdes contigs without reads
+wgs_skim build-blastdb --nt /db/blast/nt --out /db/blast_marker/metazoa_marker   # once: fast marker BLAST database
+```
 
 ### With Snakemake directly
 
@@ -147,6 +208,11 @@ snakemake --cores 32 --sdm conda --configfile my.yaml -n          # dry run
 snakemake --cores 32 --sdm conda --config reads_dir=raw taxon=fish --set-threads spades=48
 snakemake --cores 32 --sdm conda --config reads_dir=raw steps=fastp,spades,busco
 ```
+
+Scheduling: Snakemake runs jobs in parallel within `--cores` and `--mem-gb`. Every rule declares `threads` and
+`resources: mem_mb` (measured peaks are in `workflow/rules/common.smk`; GetOrganelle and SPAdes scale with the data),
+so on a 128-core / 880 GB machine many samples run at once, and on a 16-core / 64 GB laptop they queue. Change a
+rule's share with `-- --set-threads spades=48` or `-- --set-resources spades:mem_mb=200000`.
 
 Cluster: add a Snakemake executor profile, e.g. `--executor slurm --jobs 50` (snakemake-executor-plugin-slurm).
 
@@ -325,12 +391,21 @@ For an existing results directory (this workflow's or Temp_scripts/wgs_skim_pipe
 command, resumable (finished assemblies reused; annotations redone when MitoM changes):
 
 ```bash
-wgs_skim nuclear --results results/ -o nuclear_markers/ [--samples A,B] [--markers rdna,histone] [-j 3] [--max-gb 5,10]
+wgs_skim nuclear --results results/ -o nuclear_markers/ [--samples A,B] [--markers rdna,histone] [-j N] [--max-gb 5,10]
+wgs_skim nuclear --status -o nuclear_markers/        # what a running / stopped batch has done, per sample
 ```
 
--> `nuclear_markers/{rdna,histone}/{getorganelle,annotation,spades_mitom}/<sample>/`, `summary.tsv` (every sample x
-gene), `README.txt`. Reads: multi-copy units need little data - round 1 at most 5 Gb; only when the unit does not
-close, round 2 with 10 Gb seeded with round 1 (`--max-gb`, config `nuclear_max_gb`; `<marker>/getorganelle/<sample>/rounds.tsv`).
+-> `nuclear_markers/{rdna,histone}/{getorganelle,annotation}/<sample>/`, `nuclear_markers/spades_mitom/<sample>/`
+(MitoM on the SPAdes scaffolds, both markers in one run), `summary.tsv` (every sample x
+gene; rewritten after every finished sample, so a stopped batch keeps its results and a second run reuses them),
+`README.txt`. Each step prints a time-stamped line as it starts and ends. `-j` (samples at a time) comes from free
+memory and cores (1-4; ~12 GB and 16 threads each) unless given. This command is for results made outside the
+workflow (e.g. Temp_scripts/wgs_skim_pipeline); within `wgs_skim run` the same steps are Snakemake rules
+(`workflow/rules/nuclear.smk`) and scheduled with everything else. Reads: multi-copy units need little data - round 1 at most 5 Gb; only when
+the unit is not complete, round 2 with 10 Gb seeded with round 1 (`--max-gb`, config `nuclear_max_gb`;
+`<marker>/getorganelle/<sample>/rounds.tsv` lists the rounds with the label coverage of each gene). Complete = the
+path is circular, or every core gene (18S, 5.8S, 28S; H2A, H2B, H3, H4) is covered end to end by a label sequence:
+a linear rDNA unit with all genes whole is complete and gets no second round.
 An rDNA assembly the results directory already has counts as round 1.
 
 ## Output
@@ -349,8 +424,26 @@ wgs_skim_results/
 ├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary
 ├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
 ├── blast/blast_topn.tsv       COX1 / rDNA top hits with GenBank organism and taxonomy
-└── logs/  benchmarks/         one log and one runtime/memory record per job
+└── logs/  benchmarks/         one log and one runtime/memory record per job, in directories named by rule
+                               (logs/mitom, logs/getorganelle_mt + mt_iterate + mt_select, logs/getorganelle_nr ...)
 ```
+
+### From the earlier scripts (Temp_scripts)
+
+| earlier script / repository | here |
+|---|---|
+| `use_fastp_cleandata*.py`, `Fastp_Fastqc_mulitqc` | step `fastp` |
+| `Batch_assembly_of_genomes_using_GetOrganelle*.py`, `batch_getorganelle`, `batch_seeds*.py` (MEANGS → GetOrganelle) | steps `meangs`, `mito`, `getorganelle` (+ reseeded rounds, SPAdes scaffold fallback) |
+| `batch_obation_nr_using_getorg.py` (18S-28S), Hesionidae H3 seeds | step `nr` (rDNA + histone cluster, MitoM `.gbf`) |
+| `spadesv3*.py`, `fastp_spades_busco.py`, `busco2summary` | steps `spades`, `busco` (BUSCO line in the report) |
+| `jeyllfish_genome*.py`, `genome_size.py` | step `genome_size` |
+| `Mitoz-annotate` / `mitoz_get*.py`, `batch_mitos2.py` | step `annotate` (MitoM: protein genes, rRNA, tRNA, NCBI checks) |
+| `mt_circularize.py`, `check_circularity.pl`, MITObim `circules.py` | step `topology` (reads) and `wgs_skim circularize` (graph, no reads) |
+| `blast2metadata` | step `blast` (local nt or NCBI online, GenBank taxonomy); `wgs_skim build-blastdb` |
+| `mitofinder-batch`, `spades_mitofinder.py`, `mitofinder_annotate2summary.py` | `wgs_skim compare` reads MitoFinder results and compares them with GetOrganelle; MitoFinder itself is not run (MitoM annotates) |
+| `batch_report.py` / `report_pdf.py` / `report_web.py` | `summary/samples.tsv` + `summary/report.html` (no PDF) |
+| `using_bwa_draw_coverage*.py`, `organelle_coverage.py`, `plot_m2_depth.py` (depth plots) | not included yet (MitoM `mito_plot.py` draws genome maps with a depth ring) |
+| `remove_getorganelle_templefile*.py`, `remove_spades_temp.sh` | automatic: GetOrganelle intermediates and the SPAdes K* directories are removed when a step finishes |
 
 ## Resuming and re-running
 
@@ -358,6 +451,46 @@ Snakemake keeps track of every output file: run the same command again after an 
 the missing or out-of-date jobs run. Useful Snakemake options (`wgs_skim run ... -- <option>`):
 `--forcerun mt_iterate` (redo a step), `--until busco` (stop after a step), `--unlock` (after a crash),
 `--rerun-triggers mtime` (ignore changed parameters).
+
+## Troubleshooting
+
+Where to look: `logs/<step>/<sample>.log` is the tool's own output for that job; `benchmarks/<step>/<sample>.tsv`
+its runtime and peak memory; `.snakemake/log/` the Snakemake log of each run. A failed job keeps `keep-going`: the
+other samples continue, the summary waits. `wgs_skim run ... -n` shows what would run without running it.
+
+| message / symptom | cause | what to do |
+|---|---|---|
+| `no paired FASTQ files ... found` | file names not recognised | `wgs_skim samples -r DIR` shows what is detected; else a sample sheet (`-s`) |
+| `sample 'X' found twice` | two lanes / two name patterns of one sample | merge the lanes, or a sample sheet |
+| `Directory cannot be locked` / `IncompleteFilesException` | a previous run was interrupted | `wgs_skim run ... -- --unlock`, then the same command again (incomplete files are redone) |
+| `CreateCondaEnvironmentException`, `wgs_skim install` stops | network / channel problem while building an environment | run `wgs_skim install` again (finished environments are kept); `--conda-prefix` on a disk with > 20 GB free |
+| GetOrganelle: `Too few seed reads found` | the seed is too far from the sample (other family), or too few reads | histones map seeds locally already; give your own seed (`histone_seed`, `nr_seed`), or `nuclear_max_gb: 10,20` |
+| GetOrganelle: `No space left on device` | it unzips the reads it uses into its output directory (up to 1.5x the data) | results directory on a large disk; the data caps (`nuclear_max_gb`, `mt_iter_max_data_gb`) bound it |
+| mitogenome not circular (`mt_circular: no`) | reseeded rounds did not close it: repeat in the control region, low coverage | `topology/` says whether the ends can be joined (end diagnosis); `mt_iter_max_data_gb: 0` uses all reads; `wgs_skim compare` with a MitoFinder result |
+| SPAdes: `<jemalloc>: ... out of memory` or killed | the memory estimate (`spades_gib_per_gb` x clean data) was too low | the retry (profile `retries: 1`) gives 1.5x and resumes from the last checkpoint; raise `spades_min_mem_gb` |
+| SPAdes not run (`clean data ... < spades_min_clean_gb`) | too little data for an assembly | lower `spades_min_clean_gb` (0 = always) |
+| BUSCO: `lineage ... not found` / download fails | no network, or wrong name | `--busco-lineage /path/to/metazoa_odb12` (a downloaded lineage directory) |
+| BLAST takes hours | full nt is read for every search | `wgs_skim build-blastdb` once (Metazoa, <= 50 kb records: 68 GB, 1-2 min per search), then `--blast-db` |
+| `organism: (efetch failed)` in `blast/blast_topn.tsv` | NCBI Entrez did not answer for those hits | the hits and identities are in the table; `-- --forcerun blast` later repeats the search and the metadata |
+| `mitom_db`: `git clone` fails | no network for the pinned MitoM checkout / MITOS2 references | `mitom_dir: ~/mybiosofts/Mitom` and `mitos_refdir:` in the config (no clone needed then) |
+| a background run disappears | the machine ran out of memory for other jobs (the OOM killer / the session manager stops it) | start long runs with `nohup ... &` or in `tmux`; `--mem-gb` keeps this workflow within its share |
+| `rdna_copies` / `histones` empty in the report | no SPAdes assembly or no BUSCO single-copy genes to normalise against | needs steps `spades` + `busco` (`nuclear` runs them) |
+
+Still stuck: the full command Snakemake ran is the second line `wgs_skim run` prints; run it with `-n -p` to see
+each job's shell command, and open an issue with `logs/<step>/<sample>.log` attached.
+
+## Testing
+
+```bash
+python -m pytest -q tests/                              # unit tests of the scripts (seconds, no tools needed)
+wgs_skim run -r small_sample/ -o /tmp/wgs_skim_test     # end-to-end on a small sample (~30 min): see below
+wgs_skim run -r small_sample/ -o /tmp/wgs_skim_test -s sheet.tsv --steps nuclear   # with a given assembly
+```
+
+The end-to-end check used before every release is one 0.6 Gb polychaete sample (HNP1sub, 2 M read pairs): every
+step runs, `summary/samples.tsv` has one row, and the nuclear markers are compared (rDNA 5/5 genes identical
+between GetOrganelle and SPAdes-MitoM). Make such a sample from any run with
+`seqtk sample -s1 R1.fq.gz 2000000 | gzip > sub_R1.fq.gz` (and R2 with the same seed).
 
 ## Software
 

@@ -18,7 +18,7 @@ from Bio import Entrez, SeqIO
 sm = snakemake  # noqa: F821
 sys.stderr = open(sm.log[0], "w")
 out_dir = Path(sm.output.tsv).parent
-FIELDS = "qseqid sacc stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs".split()
+FIELDS = "qseqid sacc stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs slen".split()
 GB_FIELDS = ["organism", "taxonomy", "definition", "seq_length", "topology", "reference"]
 
 
@@ -66,7 +66,9 @@ def nr_regions(gb):
 
 
 def by_sample(files):
-    return {s: f for f in files for s in sm.params.samples if Path(f).name.startswith(f"{s}.")}
+    """sample -> file from the per-sample directory <...>/<sample>/<sample>.<ext> (a name prefix would confuse
+    samples X and X.1)"""
+    return {Path(f).parent.name: f for f in files}
 
 
 def queries(locus, fastas, gbs, wanted, extract):
@@ -121,26 +123,31 @@ if query.stat().st_size:
     for q in hits:
         rows += sorted(hits[q].values(), key=lambda r: -float(r["bitscore"]))[: sm.params.topn]
 
-    # GenBank records of the hits, 100 per request
+    # GenBank records of the hits, 100 per request; seq_start/seq_stop = 1: the annotation header only (organism,
+    # taxonomy, title, references) - rDNA hits are often chromosome-scale records, whose sequences would be
+    # downloaded otherwise (time-outs, then no metadata); the length comes from BLAST (slen)
     Entrez.email = sm.params.email or "wgs_skim@example.org"
     meta, accs = {}, sorted({r["sacc"] for r in rows})
     for i in range(0, len(accs), 100):
         for attempt in range(3):
             try:
-                with Entrez.efetch(db="nucleotide", id=",".join(accs[i:i + 100]), rettype="gb", retmode="text") as h:
+                with Entrez.efetch(db="nucleotide", id=",".join(accs[i:i + 100]), rettype="gb", retmode="text",
+                                   seq_start=1, seq_stop=1) as h:
                     for rec in SeqIO.parse(h, "genbank"):
                         a = rec.annotations
                         refs = a.get("references") or []
                         meta[rec.id.split(".")[0]] = {
                             "organism": a.get("organism", ""), "taxonomy": "; ".join(a.get("taxonomy", [])),
-                            "definition": rec.description, "seq_length": len(rec.seq),
+                            "definition": rec.description, "seq_length": "",
                             "topology": a.get("topology", ""), "reference": refs[0].title if refs else ""}
                 break
             except Exception as e:                       # network: retry, then leave the metadata empty
                 print(f"efetch failed ({e}), attempt {attempt + 1}/3", file=sys.stderr, flush=True)
                 time.sleep(10 * (attempt + 1))
     for r in rows:
-        r.update(meta.get(r["sacc"].split(".")[0], dict.fromkeys(GB_FIELDS, "")))
+        r.update(meta.get(r["sacc"].split(".")[0], dict.fromkeys(GB_FIELDS, "")) | {"seq_length": r.get("slen", "")})
+        if not r["organism"]:
+            r["organism"] = "(efetch failed)"            # visible in the table, not only in the log
 
 with open(sm.output.tsv, "w", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=FIELDS + GB_FIELDS, delimiter="\t", extrasaction="ignore")

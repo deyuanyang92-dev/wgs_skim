@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
-from collect_fasta import best, renamed, write_fasta  # noqa: E402
+from collect_fasta import best, clean, renamed, write_fasta  # noqa: E402
 
 sm = snakemake  # noqa: F821
 sample = sm.wildcards.sample
@@ -34,6 +34,7 @@ def max_reads():
 
 
 rounds = [("round0", *best(base / "round0"))]
+clean(base / "round0")
 log.write(f"round0: {len(rounds[0][1])} sequence(s), circular={rounds[0][2]}\n")
 cap = max_reads()
 stop = "circular" if rounds[0][2] else "rounds exhausted"
@@ -58,7 +59,8 @@ for k in range(1, int(p.rounds) + 1):
     log.flush()
     rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
     recs, circ = best(out)
-    log.write(f"round{k}: rc={rc}, {len(recs)} sequence(s), circular={circ}\n")
+    log.write(f"round{k}: rc={rc}, {len(recs)} sequence(s), circular={circ}, {clean(out) / 1e6:.0f} MB of "
+              "intermediates removed\n")
     rounds.append((f"round{k}", recs, circ))
 
 chosen = next((r for r in rounds if r[2]), None) or next((r for r in reversed(rounds) if r[1]), None) \

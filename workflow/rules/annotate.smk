@@ -11,6 +11,8 @@ rule mitom_db:
         commit=config["mitom_commit"],
         url=MITOS_REF_URL,
         md5=MITOS_REF_MD5,
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/mitom_db.log",
     conda:
@@ -34,6 +36,8 @@ rule mitom_nuc_db:
         directory(MITOM_NUC_DB),
     params:
         commit=config["mitom_nuc_commit"],
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/mitom_nuc_db.log",
     conda:
@@ -49,16 +53,18 @@ rule mitom_annotate:
     """MitoM annotation (protein genes, rRNAs, tRNAs; cox1 start; NCBI checks) of the final mitogenome."""
     input:
         fasta=rules.mt_select.output.fasta,
-        db=MITOM_DB,
+        db=[] if config["mitom_dir"] and config["mitos_refdir"] else MITOM_DB,
     output:
         gb=f"{OUT}annotation/{{sample}}/{{sample}}.mt.gb",
         tsv=f"{OUT}annotation/{{sample}}/{{sample}}.mitom.tsv",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom"),
-        refdir=lambda w, input: config["mitos_refdir"] or f"{input.db}/mitos_refs",
-        mitom=lambda w, input: config["mitom_dir"] or f"{input.db}/Mitom",
+        refdir=lambda w, input: config["mitos_refdir"] or f"{MITOM_DB}/mitos_refs",
+        mitom=lambda w, input: config["mitom_dir"] or f"{MITOM_DB}/Mitom",
         clade=config["clade"],
         code=config["genetic_code"],
+    resources:
+        mem_mb=4000,
     log:
         f"{OUT}logs/mitom/{{sample}}.log",
     benchmark:

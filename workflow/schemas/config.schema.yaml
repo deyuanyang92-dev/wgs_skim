@@ -39,6 +39,9 @@ properties:
   mt_iter_max_data_gb: {type: number, minimum: 0, default: 20}
   nr_seed: {type: string, default: ""}
   nr_label: {type: string, default: ""}
+  histone_seed: {type: string, default: ""}
+  histone_label: {type: string, default: ""}
+  nuclear_max_gb: {type: [string, number], default: "5,10", description: "Gb of reads per GetOrganelle round (rDNA, histones)"}
   spades_min_clean_gb: {type: number, minimum: 0, default: 0}
   spades_gib_per_gb: {type: number, minimum: 0, default: 6.5}
   spades_min_mem_gb: {type: number, minimum: 1, default: 32}
@@ -49,7 +52,7 @@ properties:
   blast_mt: {type: string, default: "cox1", description: "full and/or mitochondrial genes, comma separated"}
   blast_nr: {type: string, default: "18S,ITS,28S", description: "full and/or 18S ITS ITS1 5.8S ITS2 28S"}
   mitom_commit: {type: string, default: "27264d2cf672c718deff6915317a7ee01852830b"}
-  mitom_nuc_commit: {type: string, default: "4e9b99eb2160e098e4469d940b61f91cbb2b59ba"}
+  mitom_nuc_commit: {type: string, default: "6f75f73373ad5198c200b6da222a5975d7ee73ea"}
   mitom_dir: {type: string, default: "", description: "use this MitoM checkout instead of the pinned commits"}
   blast_topn: {type: integer, minimum: 1, default: 5}
   email: {type: string, default: ""}

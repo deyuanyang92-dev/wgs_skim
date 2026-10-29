@@ -10,7 +10,8 @@ snakemake --cores 32 --sdm conda --config reads_dir=/path/to/rawdata
 - `samples`: alternatively a sample sheet, TSV or CSV with columns `sample`, `fastq_1`, `fastq_2`.
 - `taxon`: `annelid` (default), `mollusc`, `fish` or `crustacean` — sets MEANGS class, genetic code, MitoM clade and
   BUSCO lineage; override any of them with `meangs_class`, `genetic_code`, `clade`, `busco_lineage`.
-- step switches: `mito`, `nr`, `assembly`, `genome_size`, `annotate`, `topology`, `blast` (true/false).
+- step switches: `meangs`, `mito`, `nr`, `assembly`, `nuc_markers`, `genome_size`, `annotate`, `topology`, `blast`
+  (true/false); or `steps:` to name the steps to run.
 - `blast_db`: local nt prefix; empty uses NCBI online BLAST. `email` is needed for GenBank metadata.
 
 Threads and memory are runtime settings: use `--cores`, `--set-threads RULE=N`, `--set-resources RULE:mem_mb=N` or a

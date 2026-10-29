@@ -35,7 +35,7 @@ if Path(sm.input.features).stat().st_size:
     for r in csv.DictReader(open(sm.input.features), delimiter="\t"):
         c = cov(r["contig"]) or (float(r["contig_cov"]) if r.get("contig_cov") else None)
         if c is not None:
-            genes.setdefault(r["gene"], []).append(c)
+            genes.setdefault(r["gene"], {})[r["contig"]] = c      # one entry per contig (two H3 copies on a contig)
 cons = {}
 if Path(sm.input.consensus).stat().st_size:
     cons = {r["gene"]: r for r in csv.DictReader(open(sm.input.consensus), delimiter="\t")}
@@ -47,11 +47,11 @@ with open(sm.output.tsv, "w", newline="") as fh:
     for g in ["18S", "ITS1", "5.8S", "ITS2", "28S", "H1", "H2A", "H2B", "H3", "H4"]:
         if g not in genes and g not in cons:
             continue
-        covs = genes.get(g, [])
+        covs = list(genes.get(g, {}).values())
         good = [c for c in covs if c >= 0.2 * max(covs)] if covs else []
         c = statistics.median(good) if good else None
         r = cons.get(g, {})
         partial = "5'" * (r.get("partial_5") == "1") + "3'" * (r.get("partial_3") == "1")
         w.writerow([g, r.get("length", ""), partial, len(good), f"{c:.1f}" if c else "",
                     f"{base:.2f}" if base else "",
-                    ("<1 (fragments)" if c / base < 0.5 else f"{c / base:.0f}") if c and base else ""])
+                    ("<1 (fragments)" if c / base < 0.5 else f"{max(1, round(c / base))}") if c and base else ""])

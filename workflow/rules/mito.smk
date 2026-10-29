@@ -5,6 +5,8 @@ rule getorganelle_db:
     """GetOrganelle label/seed databases (animal_mt for the mitogenome; rDNA uses the bundled seed/label)."""
     output:
         directory(GETORG_DB),
+    resources:
+        mem_mb=1000,
     log:
         f"{OUT}logs/getorganelle_db.log",
     conda:
@@ -25,6 +27,8 @@ rule meangs:
         cls=config["meangs_class"],
         n=config["meangs_reads"],
         insert_size=config["insert_size"],
+    resources:
+        mem_mb=12000,
     log:
         f"{OUT}logs/meangs/{{sample}}.log",
     benchmark:
@@ -58,6 +62,8 @@ rule getorganelle_mt:
         out=lambda w, output: str(Path(output.done).parent),
         k=config["getorganelle_kmers"],
         R=config["getorganelle_rounds"],
+    resources:
+        mem_mb=16000,
     log:
         f"{OUT}logs/getorganelle_mt/{{sample}}.log",
     benchmark:
@@ -91,6 +97,8 @@ rule mt_iterate:
         R=config["mt_iter_R"],
         k=config["getorganelle_kmers"],
         max_gb=config["mt_iter_max_data_gb"],
+    resources:
+        mem_mb=MT_ITER_MEM,
     log:
         f"{OUT}logs/mt_iterate/{{sample}}.log",
     benchmark:
@@ -109,8 +117,12 @@ rule mt_select:
     output:
         fasta=f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta",
         status=f"{OUT}mito/{{sample}}/{{sample}}.mt.json",
+    resources:
+        mem_mb=2000,
     log:
         f"{OUT}logs/mt_select/{{sample}}.log",
+    benchmark:
+        f"{OUT}benchmarks/mt_select/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/blast.yaml"

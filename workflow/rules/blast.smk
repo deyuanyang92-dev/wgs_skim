@@ -12,6 +12,8 @@ rule blast:
         samples=list(SAMPLES),
         mt=BLAST_MT,
         nr=BLAST_NR,
+    resources:
+        mem_mb=16000,
     log:
         f"{OUT}logs/blast.log",
     benchmark:

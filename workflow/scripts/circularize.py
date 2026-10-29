@@ -244,6 +244,9 @@ def circularize(recs, spades=None):
         gfa = Path(spades, "assembly_graph_with_scaffolds.gfa")
         adj, depth = read_graph(gfa)
         for cid, i in unclosed.items():
+            if len(paths[cid]) > 1:              # chunks separated by a scaffold gap: no link to walk from
+                rows[i]["note"] = "; ".join(x for x in (rows[i]["note"], "scaffold gap: no graph walk") if x)
+                continue
             flat = [x for c in paths[cid] for x in c]
             mt = depth[max(flat, key=lambda x: length.get(x[0], 0))[0]]   # depth of the contig's longest segment
             ws = walks(adj, lambda s, mt=mt: depth.get(s, 0) >= 0.2 * mt, flat[-1], flat[0])

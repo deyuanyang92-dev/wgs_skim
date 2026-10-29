@@ -17,18 +17,20 @@ sequence, the rDNA too (its "circle" is the tandem repeat unit). Short reads can
 never prove a linear molecule: linear_unjoined may be a gap longer than the insert size (long reads / PCR needed).
 """
 import csv
+import json
 import re
 import statistics
 import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
+try:
+    sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
+except NameError:                            # imported by the tests: the scripts directory is on sys.path already
+    pass
 from seqtools import find_circle, read_fasta  # noqa: E402
 
-sm = snakemake  # noqa: F821
-sys.stderr = open(sm.log[0], "w")
-FLANK, PAIRS = 20, sm.params.pairs
+FLANK, PAIRS, THREADS = 20, 0, 4
 CIG = re.compile(r"(\d+)([MIDNSHP=X])")
 COMP = str.maketrans("ACGTN", "TGCAN")
 
@@ -181,84 +183,97 @@ def end_diagnosis(side, n, tails, terminal, med):
 def map_reads(ref_seq, name, wd, reads):
     ref = f"{wd}/{name}.fasta"
     write_fasta(ref, [(name, ref_seq)])
-    sh(f"bwa index {ref} 2>/dev/null && bwa mem -t {sm.threads} {ref} {reads} 2>/dev/null "
+    sh(f"bwa index {ref} 2>/dev/null && bwa mem -t {THREADS} {ref} {reads} 2>/dev/null "
        f"| samtools view -F 0x904 - > {wd}/{name}.sam")
     return f"{wd}/{name}.sam"
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
-out_dir = Path(sm.output.tsv).parent
-wd = out_dir / "work"
-wd.mkdir(parents=True, exist_ok=True)
-recs, skipped = [], []
-for f in sm.input.fasta:
-    for n, q in read_fasta(f):
-        # auto: reads only for linear mitogenomes; circular ones were closed by the assembler / circularize step
-        if sm.params.mode == "auto" and ("|mt|" not in n or " circular" in n):
-            skipped.append((n.split()[0], len(q), "circular: not read-checked" if " circular" in n else "rDNA: not checked"))
-        else:
-            recs.append((n.split()[0], q))
-ann = genbank_cds(sm.input.annotation) if sm.input.get("annotation") else []
+def main(sm):
+    global PAIRS, THREADS
+    sys.stderr = open(sm.log[0], "w")
+    PAIRS, THREADS = sm.params.pairs, sm.threads
+    # auto: GetOrganelle closed the circle itself - no reads needed; a SPAdes scaffold closed by circularize (graph
+    # walk / end overlap / join) is checked, its junction can sit in a collapsed control-region repeat
+    status = json.load(open(sm.input.status)) if sm.input.get("status") else {}
+    assembler_circle = status.get("source", "getorganelle") == "getorganelle"
+    out_dir = Path(sm.output.tsv).parent
+    wd = out_dir / "work"
+    wd.mkdir(parents=True, exist_ok=True)
+    recs, skipped = [], []
+    for f in sm.input.fasta:
+        for n, q in read_fasta(f):
+            # auto: reads only for linear mitogenomes; circular ones were closed by the assembler / circularize step
+            if sm.params.mode == "auto" and ("|mt|" not in n or (" circular" in n and assembler_circle)):
+                why = "circular: not read-checked" if " circular" in n else "rDNA: not checked"
+                skipped.append((n.split()[0], len(q), why))
+            else:
+                recs.append((n.split()[0], q))
+    ann = genbank_cds(sm.input.annotation) if sm.input.get("annotation") else []
 
-rows = []
-if recs:
-    # 1. keep only the read pairs that map to any of the sequences (fast: one bwa run on the first PAIRS pairs)
-    write_fasta(f"{wd}/all.fasta", [(f"s{i}", s) for i, (_, s) in enumerate(recs)])
-    head = f"| head -n {PAIRS * 4}" if PAIRS else ""
-    sh(f"bwa index {wd}/all.fasta 2>/dev/null && bwa mem -t {sm.threads} {wd}/all.fasta "
-       f"<(zcat -f {sm.input.r1} {head}) <(zcat -f {sm.input.r2} {head}) 2> {wd}/mem.log "
-       f"| samtools view -u -G 12 - | samtools collate -O -u - {wd}/col "
-       f"| samtools fastq -1 {wd}/s1.fq -2 {wd}/s2.fq -0 /dev/null -s /dev/null - 2>/dev/null")
-    if not re.search(r"\[M::process\] read [1-9]", Path(f"{wd}/mem.log").read_text()):
-        sys.exit(f"no reads could be read from {sm.input.r1} / {sm.input.r2}")
-    reads = f"{wd}/s1.fq {wd}/s2.fq"
+    rows = []
+    if recs:
+        # 1. keep only the read pairs that map to any of the sequences (fast: one bwa run on the first PAIRS pairs)
+        write_fasta(f"{wd}/all.fasta", [(f"s{i}", s) for i, (_, s) in enumerate(recs)])
+        head = f"| head -n {PAIRS * 4}" if PAIRS else ""
+        sh(f"bwa index {wd}/all.fasta 2>/dev/null && bwa mem -t {sm.threads} {wd}/all.fasta "
+           f"<(zcat -f {sm.input.r1} {head}) <(zcat -f {sm.input.r2} {head}) 2> {wd}/mem.log "
+           f"| samtools view -u -G 12 - | samtools collate -O -u - {wd}/col "
+           f"| samtools fastq -1 {wd}/s1.fq -2 {wd}/s2.fq -0 /dev/null -s /dev/null - 2>/dev/null")
+        if not re.search(r"\[M::process\] read [1-9]", Path(f"{wd}/mem.log").read_text()):
+            sys.exit(f"no reads could be read from {sm.input.r1} / {sm.input.r2}")
+        reads = f"{wd}/s1.fq {wd}/s2.fq"
 
-    for i, (name, s) in enumerate(recs):
-        # 2. each sequence on its own index (similar sequences would share and dilute the reads)
-        c = find_circle(s)
-        circle = s[c["anchor"]:c["anchor"] + c["P"]] if c else s
-        sp = split_point(s, ann)
-        h = ((sp[1] - c["anchor"]) % c["P"] if c else sp[1]) if sp else len(circle) // 2
-        h = h if 0 < h < len(circle) else len(circle) // 2
-        rot, J = circle[h:] + circle[:h], len(circle) - h
-        local = [J + d for d in (-600, -300, -150, 150, 300, 600) if FLANK < J + d < len(rot) - FLANK]
-        cnt = spanning(map_reads(rot, f"rot{i}", wd, reads), [J] + local)
-        junction, med = cnt[J], statistics.median([cnt[p] for p in local]) if local else 0
-        lin = map_reads(s, f"lin{i}", wd, reads)
-        bridge, gap = bridging_pairs(lin, len(s))
-        ends = end_reads(lin, len(s))
+        for i, (name, s) in enumerate(recs):
+            # 2. each sequence on its own index (similar sequences would share and dilute the reads)
+            c = find_circle(s)
+            circle = s[c["anchor"]:c["anchor"] + c["P"]] if c else s
+            sp = split_point(s, ann)
+            h = ((sp[1] - c["anchor"]) % c["P"] if c else sp[1]) if sp else len(circle) // 2
+            h = h if 0 < h < len(circle) else len(circle) // 2
+            rot, J = circle[h:] + circle[:h], len(circle) - h
+            local = [J + d for d in (-600, -300, -150, 150, 300, 600) if FLANK < J + d < len(rot) - FLANK]
+            cnt = spanning(map_reads(rot, f"rot{i}", wd, reads), [J] + local)
+            junction, med = cnt[J], statistics.median([cnt[p] for p in local]) if local else 0
+            lin = map_reads(s, f"lin{i}", wd, reads)
+            bridge, gap = bridging_pairs(lin, len(s))
+            ends = end_reads(lin, len(s))
 
-        if med < 5:
-            verdict = ("circular" if c else "linear") + "_low_reads"
-        elif junction > 2 * med:
-            verdict = "circular_repeat_junction"
-        elif junction >= 0.5 * med:
-            verdict = "circular_validated"
-        elif junction >= 0.2 * med:
-            verdict = "circular_weak"
-        elif c:
-            verdict = "circular_rejected"
-        elif bridge >= max(5, 0.05 * med):
-            verdict = "linear_gap_circular"
-        else:
-            verdict = "linear_unjoined"
-        rows.append(dict(
-            sample=sm.wildcards.sample, contig=name, length=len(s), circle_length=len(circle),
-            overlap_bp=c["overlap"] if c else 0, split_at=f"{sp[0]}:{sp[1] + 1}" if sp else "midpoint",
-            junction_reads=junction, control_reads_median=med, bridging_pairs=bridge,
-            gap_estimate_bp="" if gap is None else gap,
-            end_clip=f"L {len(ends['L'][1])}/{ends['L'][0]} R {len(ends['R'][1])}/{ends['R'][0]}", verdict=verdict,
-            end_diagnosis="" if verdict.startswith("circular") else " | ".join(
-                end_diagnosis(e, ends[e][0], ends[e][1], s[:30] if e == "L" else s[-30:], med) for e in "LR")))
-        print(rows[-1], file=sys.stderr, flush=True)
-        if verdict in ("circular_validated", "circular_repeat_junction"):
-            write_fasta(out_dir / f"{name.replace('|', '_')}.circular.fasta", [(name, circle)])
+            if med < 5:
+                verdict = ("circular" if c else "linear") + "_low_reads"
+            elif junction > 2 * med:
+                verdict = "circular_repeat_junction"
+            elif junction >= 0.5 * med:
+                verdict = "circular_validated"
+            elif junction >= 0.2 * med:
+                verdict = "circular_weak"
+            elif c:
+                verdict = "circular_rejected"
+            elif bridge >= max(5, 0.05 * med):
+                verdict = "linear_gap_circular"
+            else:
+                verdict = "linear_unjoined"
+            rows.append(dict(
+                sample=sm.wildcards.sample, contig=name, length=len(s), circle_length=len(circle),
+                overlap_bp=c["overlap"] if c else 0, split_at=f"{sp[0]}:{sp[1] + 1}" if sp else "midpoint",
+                junction_reads=junction, control_reads_median=med, bridging_pairs=bridge,
+                gap_estimate_bp="" if gap is None else gap,
+                end_clip=f"L {len(ends['L'][1])}/{ends['L'][0]} R {len(ends['R'][1])}/{ends['R'][0]}", verdict=verdict,
+                end_diagnosis="" if verdict.startswith("circular") else " | ".join(
+                    end_diagnosis(e, ends[e][0], ends[e][1], s[:30] if e == "L" else s[-30:], med) for e in "LR")))
+            print(rows[-1], file=sys.stderr, flush=True)
+            if verdict in ("circular_validated", "circular_repeat_junction"):
+                write_fasta(out_dir / f"{name.replace('|', '_')}.circular.fasta", [(name, circle)])
 
-rows += [dict(sample=sm.wildcards.sample, contig=n, length=L, verdict=v) for n, L, v in skipped]
-fields = ["sample", "contig", "length", "circle_length", "overlap_bp", "split_at", "junction_reads",
-          "control_reads_median", "bridging_pairs", "gap_estimate_bp", "end_clip", "verdict", "end_diagnosis"]
-with open(sm.output.tsv, "w", newline="") as fh:
-    w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
-    w.writeheader()
-    w.writerows(rows)
-subprocess.run(["rm", "-rf", str(wd)])
+    rows += [dict(sample=sm.wildcards.sample, contig=n, length=L, verdict=v) for n, L, v in skipped]
+    fields = ["sample", "contig", "length", "circle_length", "overlap_bp", "split_at", "junction_reads",
+              "control_reads_median", "bridging_pairs", "gap_estimate_bp", "end_clip", "verdict", "end_diagnosis"]
+    with open(sm.output.tsv, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
+        w.writeheader()
+        w.writerows(rows)
+    subprocess.run(["rm", "-rf", str(wd)])
+
+
+if __name__ == "__main__":
+    main(snakemake)  # noqa: F821
