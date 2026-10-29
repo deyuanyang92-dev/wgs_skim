@@ -12,6 +12,12 @@ for _k, _v in list(config.items()):
         config[_k] = ""
 validate(config, schema="../schemas/config.schema.yaml")
 PY = sys.executable           # Snakemake's Python 3, for standard-library scripts run inside older tool environments
+if not config.get("mitofinder_sif") and config.get("mitofinder_trna") == "mitfi":
+    # bioconda MitoFinder has no MiTFi (envs/mitofinder.post-deploy.sh); tRNAscan-SE is also the first choice of
+    # the user's method (Yang et al. 2024: tRNAscan-SE > MiTFi > ARWEN)
+    print("[wgs_skim] MitoFinder without the Singularity image (mitofinder_sif): tRNAs with tRNAscan-SE, not MiTFi",
+          file=sys.stderr)
+    config["mitofinder_trna"] = "trnascan"
 
 sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
 from samples import find_pairs, read_sheet, sheet_columns  # noqa: E402
