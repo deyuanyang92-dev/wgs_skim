@@ -43,21 +43,26 @@ def queries(genes_dir, wanted):
 
 
 GENOME_RECORD = 10000          # a hit record this long is a (near-)complete mitogenome: it holds every gene
+SAME_SPECIES = 97              # identity of a hit to the same species (the foreign-gene rule applies only then)
+OTHERS_MATCH = 90              # another gene of that species matches its mitogenome at least this closely
 
 
 def foreign_genes(gs, hits, min_pident, min_qcov):
-    """queries whose close best hit (>= min_pident) is a complete mitogenome record that none of the sample's other
-    genes match closely: an animal with that mitogenome in nt would match it with its other genes too. sim5 S5
-    (Pisione RNA + Nephtys COX1/CYTB): MitoFinder kept the Nephtys COX1 (100 % to EU293739, 17 kb), the other
-    genes hit nothing close - by majority vote alone 'Nephtyidae' became the sample's family."""
+    """queries whose best hit is a complete mitogenome of the same species (>= SAME_SPECIES %) that none of the
+    sample's other genes match (>= OTHERS_MATCH %): an animal with that mitogenome in nt would match it with its
+    other genes too. sim5 S5 (Pisione RNA + Nephtys COX1/CYTB): MitoFinder kept the Nephtys COX1 (100 % to
+    EU293739, 17 kb), the other genes hit nothing close - by majority vote alone 'Nephtyidae' became the sample's
+    family. Only near-identical hits: S4 (CWSC001) rrnS 88.7 % to Micronephthys is a related genus, whose other genes
+    are naturally less similar - not a foreign gene. (min_pident: kept for the call signature.)"""
     out = set()
     for g in gs:
         b = hits.get(g["query"], [None])[0]
-        if not b or float(b["pident"]) < min_pident or float(b.get("qcovs") or 0) < min_qcov or \
+        if not b or float(b["pident"]) < SAME_SPECIES or float(b.get("qcovs") or 0) < min_qcov or \
                 int(float(b.get("slen") or 0)) < GENOME_RECORD:
             continue
-        others = [o for o in gs if o["query"] != g["query"] and hits.get(o["query"])]
-        if others and not any(h["sacc"] == b["sacc"] and float(h["pident"]) >= min_pident
+        others = [o for o in gs if o["query"].split("|")[0].split("_copy")[0] == g["query"].split("|")[0].split("_copy")[0]
+                  and o["query"].rsplit("|", 1)[1] != g["query"].rsplit("|", 1)[1] and hits.get(o["query"])]
+        if others and not any(h["sacc"] == b["sacc"] and float(h["pident"]) >= OTHERS_MATCH
                               for o in others for h in hits[o["query"]]):
             out.add(g["query"])
     return out

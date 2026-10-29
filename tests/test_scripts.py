@@ -440,3 +440,39 @@ def test_every_script_imports_without_side_effects(tmp_path, monkeypatch):
             continue
         importlib.import_module(p.stem)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_foreign_gene_same_species_only():
+    """sim5: S5 COX1 100 % to the Nephtys mitogenome EU293739 that no other gene matches -> foreign; S4 rrnS
+    88.7 % to Micronephthys (a related genus, other genes 76 %) -> not foreign"""
+    def hit(q, acc, fam, pid, cov=99, slen=17000):
+        return {"qseqid": q, "sacc": acc, "organism": fam, "taxonomy": f"Metazoa; Annelida; {fam}; x",
+                "pident": str(pid), "qcovs": str(cov), "slen": str(slen)}
+    rows = [hit("S5|COX1", "EU293739", "Nephtyidae", 100), hit("S5|rrnS", "Pis1", "Pisionidae", 82.4),
+            hit("S5|COX3", "Are1", "Arenicolidae", 75.9),
+            hit("S4|rrnS", "NC_087810", "Nephtyidae", 88.7), hit("S4|ND6", "NC_087810", "Nephtyidae", 76.3),
+            hit("S4|COX1", "Eul1", "Eulepethidae", 77.2)]
+    qids = ["S5|COX1", "S5|rrnS", "S5|COX3", "S4|rrnS", "S4|ND6", "S4|COX1"]
+    genes, samples = mitofinder_check.check(rows, qids, 85)
+    s = {x["sample"]: x for x in samples}
+    assert s["S5"]["verdict"] == "possible contamination: COX1" and s["S5"]["family"] != "Nephtyidae"
+    assert not s["S4"]["verdict"].startswith("possible contamination")
+
+
+def test_extra_copies_from_joined_transcripts(tmp_path):
+    """MitoFinder annotates COX1 on t1 only: t2 (also COX1 by blastx, reverse strand) becomes an extra copy"""
+    import mitofinder_run
+    out = tmp_path
+    (out / "Final_Results").mkdir()
+    t1, t2 = "ATG" + "A" * 97, "C" * 40 + "TTTGGG" + "C" * 54
+    joined = t1 + "N" * 200 + t2
+    (tmp_path / "joined.fasta").write_text(f">j\n{joined}\n")
+    (out / "Final_Results" / "S_mtDNA_contig.gff").write_text(
+        "j\tmitofinder\tCDS\t1\t100\t.\t+\t0\tName=COX1 CDS\n")
+    places = [{"transcript": "t1", "start": "1", "end": "100", "gene": "cox1", "gene_start": "1", "gene_end": "100"},
+              {"transcript": "t2", "start": "301", "end": "400", "gene": "COI", "gene_start": "46",
+               "gene_end": "41"}]
+    assert mitofinder_run.back_to_transcripts(out, "S", tmp_path / "joined.fasta", places) == 1
+    extra = seqtools.read_fasta(out / "S.mitofinder.extra_copies.fasta")
+    assert extra == [("COX1 t2 46-41", "CCCAAA")]
+    assert seqtools.read_fasta(out / "S.mitofinder.fasta") == [("t1", t1)]

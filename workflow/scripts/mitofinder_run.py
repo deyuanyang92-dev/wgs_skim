@@ -20,10 +20,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
 from runtools import run, sh  # noqa: E402
-from seqtools import read_fasta, write_fasta  # noqa: E402
+from seqtools import rc, read_fasta, write_fasta  # noqa: E402
 from tables import read_tsv, write_tsv  # noqa: E402
 
 READ_ASSEMBLERS = ("megahit", "metaspades")
+GENE_ALIAS = {"COI": "COX1", "CO1": "COX1", "COII": "COX2", "CO2": "COX2", "COIII": "COX3", "CO3": "COX3",
+              "COB": "CYTB", "CYB": "CYTB", "ATPASE6": "ATP6", "ATPASE8": "ATP8"}
+
+
+def gene_name(name):
+    """reference / MitoFinder gene names on one scheme: COX1 ... ND4L CYTB ATP6 (nad1 -> ND1, coi -> COX1)"""
+    n = name.upper().replace("NAD", "ND")
+    return GENE_ALIAS.get(n, n)
 
 
 def first_pairs(r1, r2, wd, max_pairs):
@@ -84,6 +92,17 @@ def back_to_transcripts(out, sample, joined, places):
     write_tsv(out / f"{sample}.mitofinder.transcripts.tsv", rows, ["type", "name", "strand", "transcript", "start",
                                                                    "end"])
     write_fasta(list(keep.items()), out / f"{sample}.mitofinder.fasta", width=0)
+    # MitoFinder annotates a gene once per sequence: a second transcript of the same gene (another isoform, or a
+    # contaminant's - sim5 S5: Pisione COX1 annotated, the Nephtys COX1 not) would be lost. Candidates whose
+    # blastx gene MitoFinder did not annotate on them are kept as extra copies (mitofinder_summary.py: _copyN).
+    annotated = {(r["transcript"], gene_name(r["name"])) for r in rows if r["type"] != "tRNA"}
+    extra = []
+    for p in places:
+        if p.get("gene") and (p["transcript"], gene_name(p["gene"])) not in annotated:
+            a, b = int(p["gene_start"]), int(p["gene_end"])
+            s = seq[int(p["start"]) - 1:int(p["end"])][min(a, b) - 1:max(a, b)]
+            extra.append((f"{gene_name(p['gene'])} {p['transcript']} {a}-{b}", rc(s) if a > b else s))
+    write_fasta(extra, out / f"{sample}.mitofinder.extra_copies.fasta", width=0)
     return len(keep)
 
 

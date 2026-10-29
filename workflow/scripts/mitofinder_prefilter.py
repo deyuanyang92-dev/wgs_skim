@@ -30,6 +30,8 @@ from seqtools import genbank_proteins, genbank_seqs, iter_fasta, write_fasta  # 
 from tables import write_tsv  # noqa: E402
 
 SPACER = 200
+PLACES = ["transcript", "start", "end", "gene", "gene_start", "gene_end"]   # map.tsv: place in the joined sequence,
+#                                                                            best reference protein and its region
 
 COV = re.compile(r"_length_(\d+)_cov_([\d.]+)")
 
@@ -63,30 +65,39 @@ def ref_hits(fasta, ref, threads=4):
 
 
 def protein_hits(fasta, ref, threads=4, code=5):
-    """record names (first word) of `fasta` with a blastx hit (e <= 1e-5, mitochondrial genetic code) to a protein
-    of the reference GenBank"""
+    """{record name (first word): (gene, start, end)} of the records of `fasta` with a blastx hit (e <= 1e-5,
+    mitochondrial genetic code) to a protein of the reference GenBank: the best protein and the aligned region
+    (start > end: the gene is on the reverse strand)"""
     prots = genbank_proteins(ref)
     if not prots:
-        return set()
+        return {}
     with tempfile.TemporaryDirectory() as tmp:
         write_fasta(prots, f"{tmp}/ref.faa")
         output(["makeblastdb", "-in", f"{tmp}/ref.faa", "-dbtype", "prot", "-out", f"{tmp}/ref"])
         out = output(["blastx", "-query", fasta, "-db", f"{tmp}/ref", "-query_gencode", code, "-evalue", "1e-5",
-                      "-outfmt", "6 qseqid", "-max_target_seqs", 5, "-num_threads", threads])
-    return set(out.split())
+                      "-outfmt", "6 qseqid sseqid qstart qend bitscore", "-max_target_seqs", 5, "-num_threads", threads])
+    best = {}
+    for line in out.splitlines():
+        q, s, a, b, score = line.split("\t")
+        if q not in best or float(score) > best[q][3]:
+            best[q] = (s, int(a), int(b), float(score))
+    return {q: v[:3] for q, v in best.items()}
 
 
 def concat_transcripts(fasta, ref, out, min_len=300, threads=4, code=5, name="mt_transcripts"):
     """the candidate mitochondrial transcripts joined with N spacers -> out (one record) + out.map.tsv; returns the
     number of candidates (module doc)"""
-    cands = protein_hits(fasta, ref, threads, code) | ref_hits(fasta, ref, threads)
+    prot = protein_hits(fasta, ref, threads, code)
+    cands = set(prot) | ref_hits(fasta, ref, threads)
     recs = [(n.split()[0], s) for n, s in iter_fasta(fasta, upper=False) if len(s) >= min_len and n.split()[0] in cands]
     pos, rows = 0, []
     for n, s in recs:
-        rows.append({"transcript": n, "start": pos + 1, "end": pos + len(s)})
+        g = prot.get(n, ("", "", ""))
+        rows.append({"transcript": n, "start": pos + 1, "end": pos + len(s), "gene": g[0], "gene_start": g[1],
+                     "gene_end": g[2]})
         pos += len(s) + SPACER
     write_fasta([(name, ("N" * SPACER).join(s for _, s in recs))] if recs else [], out)
-    write_tsv(f"{out}.map.tsv", rows, ["transcript", "start", "end"])
+    write_tsv(f"{out}.map.tsv", rows, PLACES)
     return len(recs)
 
 
@@ -131,7 +142,7 @@ def main():
         print(f"{n} candidate mitochondrial transcripts >= {a.min_len} bp joined -> {a.out} (+ .map.tsv)")
         return
     keep, how = select(a.fasta, a.min_len, a.factor, a.ref, a.threads)
-    write_tsv(f"{a.out}.map.tsv", [], ["transcript", "start", "end"])        # no joined transcripts
+    write_tsv(f"{a.out}.map.tsv", [], PLACES)                                # no joined transcripts
     with open(a.out, "w") as out:
         out.writelines(f">{n}\n{s}\n" for n, s in iter_fasta(a.fasta, upper=False) if n in keep)
     print(how)

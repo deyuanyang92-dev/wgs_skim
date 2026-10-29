@@ -7,7 +7,9 @@ Each directory is a rule-mitofinder output: <s>.mitofinder.fasta / .gb and Final
   mitofinder_summary.tsv   sample, contigs, total length, circular, protein genes / rRNAs / tRNAs found, then the
                            length (bp) of every gene found in any sample (N = not found)
   mitofinder_contigs.tsv   one row per mitochondrial contig (.infos): initial contig, length, GC, circularization
-  genes/<gene>.fasta       every sample's copy of the gene (<sample>_copy2 ... for extra copies), ready to align
+  genes/<gene>.fasta       every sample's copy of the gene (<sample>_copy2 ... for extra copies, including the
+                           transcripts of the gene MitoFinder did not annotate: <s>.mitofinder.extra_copies.fasta),
+                           ready to align
   contigs/<s>_all_mt.fasta every sample's mitochondrial contigs (+ <s>_mt_contigsID_list.txt)
   README.txt               what the files are; MitoFinder version and source
 """
@@ -46,6 +48,12 @@ def sample_result(d):
         for name, seq in read_fasta(f):
             r["genes"].setdefault(name.split("@", 1)[-1].split()[0], []).append(seq)
     r["trna"] = gb_trnas(d / f"{s}.mitofinder.gb")
+    extra = d / f"{s}.mitofinder.extra_copies.fasta"        # joined transcripts: copies MitoFinder did not annotate
+    r["extra"] = 0
+    if extra.exists():
+        for name, seq in read_fasta(extra):
+            r["genes"].setdefault(name.split()[0], []).append(seq)
+            r["extra"] += 1
     return r
 
 
