@@ -153,19 +153,35 @@ def errors(s, rng):
     return "".join(s)
 
 
+def quality_pool(rng, n=2000):
+    """Illumina-like quality strings (Phred+33, NovaSeq binning F : , #): mostly Q37, Q25 / Q11 more often toward
+    the 3' end, a few Q2. A constant 'F' everywhere has no character below '@', so tools that guess the offset
+    (GetOrganelle -> SPAdes --phred-offset 64, first simulation) read every base as Q6."""
+    pool = []
+    for _ in range(n):
+        q = []
+        for i in range(READ):
+            x, late = rng.random(), i / READ
+            q.append("#" if x < 0.002 + 0.01 * late ** 4 else "," if x < 0.01 + 0.03 * late ** 2
+                     else ":" if x < 0.05 + 0.10 * late ** 2 else "F")
+        pool.append("".join(q))
+    return pool
+
+
 def write_reads(parts, prefix, sample, rng):
     """parts: [(Template, pairs)]; pairs drawn in random order -> prefix_R1.fq.gz / _R2.fq.gz; returns pairs"""
     order = [j for j, (_, p) in enumerate(parts) for _ in range(p)]
     rng.shuffle(order)
     total = len(order)
-    q = "F" * READ
+    pool = quality_pool(rng)
     with gzip.open(f"{prefix}_R1.fq.gz", "wt", compresslevel=1) as f1, \
             gzip.open(f"{prefix}_R2.fq.gz", "wt", compresslevel=1) as f2:
         for k, j in enumerate(order):
             frag = parts[j][0].fragment(rng, max(READ + 20, int(rng.gauss(INSERT, INSERT_SD))))
             r1, r2 = errors(frag[:READ], rng), errors(rc(frag)[:READ], rng)
-            f1.write(f"@{sample}:{k + 1} 1:N:0\n{r1}\n+\n{q[:len(r1)]}\n")
-            f2.write(f"@{sample}:{k + 1} 2:N:0\n{r2}\n+\n{q[:len(r2)]}\n")
+            q1, q2 = pool[rng.randrange(len(pool))], pool[rng.randrange(len(pool))]
+            f1.write(f"@{sample}:{k + 1} 1:N:0\n{r1}\n+\n{q1[:len(r1)]}\n")
+            f2.write(f"@{sample}:{k + 1} 2:N:0\n{r2}\n+\n{q2[:len(r2)]}\n")
     return total
 
 

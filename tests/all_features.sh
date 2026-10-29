@@ -69,8 +69,8 @@ feat 02 fastp "qc/{s}/{s}.R1.fq.gz qc/{s}/{s}.fastp.html" "clean 数据量、Q30
 clean=$out/02_fastp/qc
 feat 03 meangs "mito/{s}/meangs/{s}.seed.fasta" "MEANGS 种子：长度、是否线粒体（与 truth/<s>/mt.fasta 比）" \
     wgs_skim meangs -r "$clean" -o @
-feat 04 getorganelle_mt "mito/{s}/{s}.mt.fasta mito/{s}/{s}.mt.json" \
-    "GetOrganelle 自带种子：长度与环化（truth: S1-S4 环状，S5 线状）；mt.json 的 rounds / stop" \
+feat 04 getorganelle_mt "mito/{s}/{s}.mt.json" \
+    "GetOrganelle 自带种子（animal_mt）：长度与环化（truth: S1-S4 环状，S5 线状）；种子太远时可能没有结果（mt.json 的 stop），这正是推荐 05 的原因" \
     wgs_skim getorganelle -r "$clean" -o @
 feat 05 meangs-getorganelle "mito/{s}/{s}.mt.fasta mito/{s}/{s}.mt.json mito/{s}/meangs/{s}.seed.fasta" \
     "推荐组合：MEANGS 种子 + GetOrganelle，未成环时迭代；与 04 比较" \

@@ -1,7 +1,8 @@
 """Reseed GetOrganelle until the mitogenome is circular (Snakemake script for rule mt_iterate).
 
 Round 0 is the first assembly (rule getorganelle_mt). If it is not circular, each further round uses the previous
-round's result as the seed (-s), a higher -R and all clean reads; when the clean data exceed `max_gb` Gb only that
+round's result as the seed (-s), a higher -R and all clean reads (a round with no sequence to reseed from is
+tried once with all reads, not repeated); when the clean data exceed `max_gb` Gb only that
 much is used (converted to GetOrganelle --max-reads with the mean read length from fastp). Stops at the first
 circular round, and when a round returns the same sequence as the round before: more rounds cannot help then
 (MJ20260820041: CHY007, HN_Pisione_1/2, WenSC001 changed by 0-74 bp after round 1 and never again; ~6 h of identical
@@ -49,6 +50,11 @@ def main(sm):
             break
         if k >= 2 and rounds[-1][1] and sorted(s for _, s in rounds[-1][1]) == sorted(s for _, s in rounds[-2][1]):
             stop = f"no change after {rounds[-1][0]}"
+            break
+        if k >= 2 and not any(r for _, r, _ in rounds):
+            # no sequence yet: no seed to reseed with, so this round would repeat the last one (same seeds, reads,
+            # -R) - sim5 with GetOrganelle's own seeds: rounds 1-3 identical and empty, 75 min for nothing
+            stop = f"no sequence in round0-{rounds[-1][0]} (seeds too distant: use MEANGS, --steps mito)"
             break
         prev = next((r for _, r, _ in reversed(rounds) if r), None)
         out = base / f"round{k}"
