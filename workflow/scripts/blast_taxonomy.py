@@ -14,8 +14,6 @@ import sys
 import time
 from pathlib import Path
 
-from Bio import Entrez, SeqIO
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
 if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
     sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
@@ -41,6 +39,7 @@ def norm(name):
 def mt_genes(gb):
     """{gene: longest sequence} of the CDS / rRNA in a MitoM GenBank file."""
     genes = {}
+    from Bio import SeqIO                     # Biopython only where needed: the module imports without it
     for rec in SeqIO.parse(gb, "genbank"):
         for f in rec.features:
             if f.type in ("CDS", "rRNA") and "gene" in f.qualifiers:
@@ -53,6 +52,7 @@ def mt_genes(gb):
 def nr_regions(gb):
     """{18S, ITS1, 5.8S, ITS2, 28S, ITS: longest copy} from the `mitom nuc` GenBank file."""
     regions = {}
+    from Bio import SeqIO                     # Biopython only where needed: the module imports without it
     for rec in SeqIO.parse(gb, "genbank"):
         feats = [(NR_PRODUCT[f.qualifiers["product"][0]], f) for f in rec.features
                  if f.qualifiers.get("product", [""])[0] in NR_PRODUCT]
@@ -112,6 +112,7 @@ def blast_topn(query, out_tsv, db="", topn=5, threads=8, email=""):
         # GenBank records of the hits, 100 per request; seq_start/seq_stop = 1: the annotation header only
         # (organism, taxonomy, title, references) - rDNA hits are often chromosome-scale records, whose sequences
         # would be downloaded otherwise (time-outs, then no metadata); the length comes from BLAST (slen)
+        from Bio import Entrez, SeqIO
         Entrez.email = email or "wgs_skim@example.org"
         meta, accs = {}, sorted({r["sacc"] for r in rows})
         for i in range(0, len(accs), 100):

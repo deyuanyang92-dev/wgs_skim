@@ -286,7 +286,7 @@ def test_fasta_samples_dir_and_merged_split(tmp_path):
     merged.write_text(">B2 topology=circular\nAAA\n>B17\nCC\n>B2 topology=linear\nTT\n")
     got = samples.fasta_samples([merged], tmp_path / "split", split_by_id=True)
     assert sorted(got) == ["B17", "B2"]
-    assert Path(got["B2"]).read_text() == ">B2_contig1\nAAA\n>B2_contig2\nTT\n"
+    assert Path(got["B2"]).read_text() == ">B2_contig1 topology=circular\nAAA\n>B2_contig2 topology=linear\nTT\n"
     assert Path(got["B17"]).read_text() == ">B17\nCC\n"
     man = (tmp_path / "split" / "split_manifest.tsv").read_text().splitlines()
     assert "B2\tB2_contig2\tB2 topology=linear" in man
@@ -421,7 +421,7 @@ def test_split_by_id_sample_before_bar(tmp_path):
     f.write_text(">A|mt|1 circular\nAC\n>A|mt|2 linear\nGT\n>B2 COI\nTT\n")
     out = samples.split_fasta([f], tmp_path / "split")
     assert sorted(out) == ["A", "B2"]
-    assert Path(out["A"]).read_text() == ">A_contig1\nAC\n>A_contig2\nGT\n"
+    assert Path(out["A"]).read_text() == ">A_contig1 circular\nAC\n>A_contig2 linear\nGT\n"   # topology kept
 
 
 def test_mitofinder_prefilter_coverage():

@@ -138,7 +138,8 @@ def split_fasta(files, split_dir):
             with open(f, "w") as fh:
                 for i, (header, seq) in enumerate(rs, 1):
                     new = s if len(rs) == 1 else f"{s}_contig{i}"
-                    fh.write(f">{new}\n{seq}\n")
+                    desc = header.split(None, 1)[1] if len(header.split(None, 1)) > 1 else ""
+                    fh.write(f">{new}{' ' + desc if desc else ''}\n{seq}\n")     # description kept: circular ...
                     man.write(f"{s}\t{new}\t{header}\n")
             out[s] = str(f)
     return out

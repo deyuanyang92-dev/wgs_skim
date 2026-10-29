@@ -82,6 +82,37 @@ def is_circular(header):
     return "circular" in header.lower()
 
 
+def genbank_features(path):
+    """[(record name, [{'type', 'location', qualifier: value ...}])] of a GenBank flat file, without Biopython"""
+    recs, feats, cur, key, in_ft, name = [], [], None, None, False, None
+    for line in open(path):
+        if line.startswith("LOCUS"):
+            name, feats, in_ft = line.split()[1], [], False
+        elif line.startswith("FEATURES"):
+            in_ft = True
+        elif line.startswith(("ORIGIN", "CONTIG", "//")):
+            if in_ft and name is not None:
+                recs.append((name, feats))
+            in_ft, name = False, None if line.startswith("//") else name
+        elif in_ft and len(line) > 21:
+            if line[5] != " ":                                       # a new feature
+                cur, key = {"type": line[5:21].strip(), "location": line[21:].strip()}, "location"
+                feats.append(cur)
+            elif line[21] == "/":                                    # a qualifier
+                k, _, v = line[22:].rstrip("\n").partition("=")
+                key, cur[k] = k, v.strip('"')
+            elif cur is not None and key:                            # a continuation line
+                add = line[21:].strip().strip('"')
+                cur[key] += add if key in ("location", "translation") else " " + add
+    return recs
+
+
+def genbank_proteins(path):
+    """[(gene, PROTEIN)] of the CDS with a /translation (gene: /gene, else the first word of /product)"""
+    return [((f.get("gene") or f.get("product", "CDS")).split()[0], f["translation"])
+            for _, feats in genbank_features(path) for f in feats if f["type"] == "CDS" and f.get("translation")]
+
+
 def genbank_seqs(path):
     """[(accession or LOCUS name, SEQUENCE)] of a GenBank flat file, without Biopython (any Python 3 environment)"""
     recs, name, seq, in_seq = [], None, [], False

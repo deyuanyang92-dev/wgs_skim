@@ -29,6 +29,7 @@ properties:
   mitofinder_min_contig_rna: {type: integer, default: 300}
   mitofinder_cov_factor: {type: [integer, number], default: 5}
   mitofinder_max_pairs: {type: integer, default: 10000000}
+  mitofinder_concat_transcripts: {type: boolean, default: true}
   mitofinder_blast: {type: boolean, default: true}
   mitofinder_blast_genes: {type: string, default: all}
   mitofinder_min_pident: {type: [integer, number], default: 85}

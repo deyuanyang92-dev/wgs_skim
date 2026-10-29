@@ -20,6 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
 from runtools import run, sh  # noqa: E402
+from seqtools import read_fasta, write_fasta  # noqa: E402
+from tables import read_tsv, write_tsv  # noqa: E402
 
 READ_ASSEMBLERS = ("megahit", "metaspades")
 
@@ -58,8 +60,36 @@ def collect(final, out, sample):
     return len(contigs)
 
 
+def back_to_transcripts(out, sample, joined, places):
+    """genes MitoFinder annotated on the joined transcripts (mitofinder_prefilter.py --concat) -> their transcripts:
+    <s>.mitofinder.fasta becomes the transcripts holding a CDS / rRNA, <s>.mitofinder.transcripts.tsv lists every
+    feature with its transcript and position there; returns the number of transcripts"""
+    out = Path(out)
+    gff = next(iter(sorted((out / "Final_Results").glob("*_mtDNA_contig*.gff"))), None)
+    if not gff:
+        return 0
+    seq = read_fasta(joined)[0][1] if Path(joined).stat().st_size else ""
+    rows, keep = [], {}
+    for line in open(gff):
+        t = line.rstrip("\n").split("\t")
+        if len(t) < 9 or t[2] not in ("CDS", "rRNA", "tRNA"):
+            continue
+        a, b = int(t[3]), int(t[4])
+        p = next((p for p in places if int(p["start"]) <= a and b <= int(p["end"])), None)
+        name = t[8].split("Name=")[-1].split()[0] if "Name=" in t[8] else t[2]
+        rows.append({"type": t[2], "name": name, "strand": t[6], "transcript": p["transcript"] if p else "(spans a gap)",
+                     "start": a - int(p["start"]) + 1 if p else a, "end": b - int(p["start"]) + 1 if p else b})
+        if p and t[2] != "tRNA":
+            keep[p["transcript"]] = seq[int(p["start"]) - 1:int(p["end"])]
+    write_tsv(out / f"{sample}.mitofinder.transcripts.tsv", rows, ["type", "name", "strand", "transcript", "start",
+                                                                   "end"])
+    write_fasta(list(keep.items()), out / f"{sample}.mitofinder.fasta", width=0)
+    return len(keep)
+
+
 def run_mitofinder(sample, ref, out, assembly=None, r1=None, r2=None, assembler="megahit", max_pairs=10_000_000,
-                   code=5, trna="mitfi", min_contig=1000, threads=8, mem_gb=16, sif="", source="", log=None):
+                   code=5, trna="mitfi", min_contig=1000, threads=8, mem_gb=16, sif="", source="", log=None,
+                   places=None):
     """MitoFinder on one sample (module doc); returns a status dict, also written to out/mitofinder.json"""
     out = Path(out).resolve()
     wd, res = out / "run", out / "Final_Results"
@@ -83,8 +113,12 @@ def run_mitofinder(sample, ref, out, assembly=None, r1=None, r2=None, assembler=
         shutil.copy(assembly, wd / "assembly.fasta")
         data, bind = ["-a", wd / "assembly.fasta"], [assembly]
     bind = [Path(b).resolve().parent for b in [*bind, ref]] + [wd, out]
+    places = read_tsv(places) if places else []
     cmd = mitofinder_exe(sif, bind) + ["-j", sample, *data, "-r", ref, "-o", code, "-p", threads, "-m", int(mem_gb),
-                                       "-t", trna, "--min-contig-size", min_contig, "--adjust-direction"]
+                                       "-t", trna, "--min-contig-size", min_contig]
+    # joined transcripts: one long sequence (MitoFinder's default --max-contig-size 25000 would drop it), kept in
+    # the given orientation so that the positions map back
+    cmd += ["--max-contig-size", Path(assembly).stat().st_size + 1000] if places else ["--adjust-direction"]
     # MitoFinder exits 0 after "Aborting." (e.g. bioconda 1.4.1 without install.sh.ok: "MitoFinder is not
     # installed") - that is a failure, not "no mitochondrial contig"
     if run(cmd, log, cwd=wd) or "Aborting" in Path(log).read_text(errors="replace"):
@@ -95,6 +129,8 @@ def run_mitofinder(sample, ref, out, assembly=None, r1=None, r2=None, assembler=
     if final:
         shutil.move(str(final), str(res))
     status["contigs"] = collect(res if final else None, out, sample)
+    if places and status["contigs"]:
+        status["transcripts"] = back_to_transcripts(out, sample, wd / "assembly.fasta", places)
     if not status["contigs"]:
         status["note"] = "MitoFinder found no mitochondrial contig"
         with open(log, "a") as fh:
@@ -129,11 +165,12 @@ def main(argv=None):
     ap.add_argument("--sif", default=os.environ.get("MITOFINDER_SIF", ""))
     ap.add_argument("--source", default="")
     ap.add_argument("--log")
+    ap.add_argument("--places", help="map.tsv of mitofinder_prefilter.py --concat: -a holds joined transcripts")
     a = ap.parse_args(argv)
     if not (a.assembly or (a.r1 and a.r2)):
         ap.error("give an assembly (-a) or reads (-1 / -2)")
     st = run_mitofinder(a.sample, a.ref, a.out, a.assembly, a.r1, a.r2, a.assembler, a.max_pairs, a.code, a.trna,
-                        a.min_contig, a.threads, a.mem_gb, a.sif, a.source, a.log)
+                        a.min_contig, a.threads, a.mem_gb, a.sif, a.source, a.log, a.places)
     print(f"{st['sample']}: {st['contigs']} mitochondrial contig(s) {st['note']}".rstrip())
 
 

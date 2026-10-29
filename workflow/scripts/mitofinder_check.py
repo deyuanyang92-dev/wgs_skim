@@ -42,6 +42,27 @@ def queries(genes_dir, wanted):
     return out
 
 
+GENOME_RECORD = 10000          # a hit record this long is a (near-)complete mitogenome: it holds every gene
+
+
+def foreign_genes(gs, hits, min_pident, min_qcov):
+    """queries whose close best hit (>= min_pident) is a complete mitogenome record that none of the sample's other
+    genes match closely: an animal with that mitogenome in nt would match it with its other genes too. sim5 S5
+    (Pisione RNA + Nephtys COX1/CYTB): MitoFinder kept the Nephtys COX1 (100 % to EU293739, 17 kb), the other
+    genes hit nothing close - by majority vote alone 'Nephtyidae' became the sample's family."""
+    out = set()
+    for g in gs:
+        b = hits.get(g["query"], [None])[0]
+        if not b or float(b["pident"]) < min_pident or float(b.get("qcovs") or 0) < min_qcov or \
+                int(float(b.get("slen") or 0)) < GENOME_RECORD:
+            continue
+        others = [o for o in gs if o["query"] != g["query"] and hits.get(o["query"])]
+        if others and not any(h["sacc"] == b["sacc"] and float(h["pident"]) >= min_pident
+                              for o in others for h in hits[o["query"]]):
+            out.add(g["query"])
+    return out
+
+
 def check(rows, qids, min_pident, min_qcov=50):
     """(gene rows, sample rows) from the BLAST hits.
 
@@ -50,9 +71,10 @@ def check(rows, qids, min_pident, min_qcov=50):
     (>= min_pident): a contaminant matches its source closely, while a gene without a close relative in nt just
     hits whatever is least distant (MJ20260820041 CHY006-008: best COX1 82 % Travisia; ATP6 / COX2 / ND4 best hits
     Enchytraeidae / Drosophila / Bagridae at 72-83 %, often over 15-70 % of the gene - no contamination)."""
-    best = {}
+    best, hits = {}, {}
     for r in rows:                                    # rows are best first per query
         best.setdefault(r["qseqid"], r)
+        hits.setdefault(r["qseqid"], []).append(r)
     genes, by_sample = [], {}
     for q in qids:
         sample, gene = q.rsplit("|", 1)
@@ -67,7 +89,8 @@ def check(rows, qids, min_pident, min_qcov=50):
         by_sample.setdefault(base, []).append(g)
     samples = []
     for s, gs in by_sample.items():
-        hit = [g for g in gs if g["family"] and float(g["qcovs"] or 0) >= min_qcov]
+        foreign = foreign_genes(gs, hits, min_pident, min_qcov)
+        hit = [g for g in gs if g["family"] and float(g["qcovs"] or 0) >= min_qcov and g["query"] not in foreign]
         votes = Counter(g["family"] for g in hit)
         major = max(votes, key=lambda f: (votes[f], sum(float(g["pident"]) for g in hit if g["family"] == f)),
                     default="")
@@ -76,7 +99,10 @@ def check(rows, qids, min_pident, min_qcov=50):
             if not g["family"]:
                 continue
             pid, cov = float(g["pident"]), float(g["qcovs"] or 0)
-            if cov < min_qcov:
+            if g["query"] in foreign:
+                g["verdict"] = (f"possible contamination: {g['organism']} ({g['family']}, {pid:.1f}%; its complete "
+                                f"mitogenome {g['best_hit']} matches none of the sample's other genes)")
+            elif cov < min_qcov:
                 g["verdict"] = f"partial hit ({cov:.0f}% of the gene)"
             elif g["family"] == major:
                 g["verdict"] = "ok" if pid >= min_pident else f"no close reference ({pid:.1f}%)"

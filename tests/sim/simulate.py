@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workflow" / "scripts"))
-from seqtools import genbank_seqs, iter_fasta, rc, read_fasta, write_fasta  # noqa: E402
+from seqtools import genbank_features, genbank_seqs, iter_fasta, rc, read_fasta, write_fasta  # noqa: E402
 from tables import write_tsv  # noqa: E402
 
 READ, INSERT, INSERT_SD, ERR = 150, 350, 50, 0.002
@@ -40,21 +40,9 @@ COV = re.compile(r"_cov_([\d.]+)")
 def genbank_genes(path):
     """[(gene, SEQUENCE)] of the CDS and rRNA features of a GenBank file (join / complement locations)"""
     seq = genbank_seqs(path)[0][1]
-    genes, feat, loc, key = [], None, "", None
-    lines = open(path).read().split("ORIGIN")[0].splitlines()
-    for line in lines + ["     end"]:
-        if len(line) > 5 and line[5] != " " and line.startswith("     "):        # a new feature
-            if feat in ("CDS", "rRNA") and key:
-                genes.append((key, cut(seq, loc)))
-            parts = line.split()
-            feat, loc, key = parts[0], parts[1] if len(parts) > 1 else "", None
-        elif line.startswith("                     /"):
-            m = re.match(r'\s+/(gene|product)="([^"]+)"', line)
-            if m and key is None:
-                key = m.group(2).split()[0]
-        elif line.startswith("                     ") and feat and not line.strip().startswith("/") and key is None:
-            loc += line.strip()
-    return [(g, s) for g, s in genes if s]
+    feats = genbank_features(path)[0][1]
+    return [((f.get("gene") or f.get("product", f["type"])).split()[0], cut(seq, f["location"]))
+            for f in feats if f["type"] in ("CDS", "rRNA") and cut(seq, f["location"])]
 
 
 def cut(seq, loc):

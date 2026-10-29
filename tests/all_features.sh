@@ -4,6 +4,7 @@
 # SIM_DIR: simulate.py output (dna/, rna/, truth/, truth.tsv). OUT_DIR/NN_<function>/ holds that function's results
 # and CHECK.md (command, result, time, the files to look at and what to check); OUT_DIR/features.tsv lists them all.
 # The DNA and RNA functions are two lanes (run them at the same time: one call with dna, one with rna).
+# ONLY="13 36" reruns just these functions (their directories are replaced; the other directories are inputs).
 # Then: python tests/sim/check_truth.py SIM_DIR OUT_DIR  (assemblies against the truth -> OUT_DIR/truth_check.tsv)
 set -uo pipefail
 sim=$(realpath "${1:?usage: tests/all_features.sh SIM_DIR OUT_DIR [dna|rna|all]}")
@@ -16,7 +17,7 @@ mkdir -p "$out/inputs"
 samples=$(wgs_skim samples -r "$dna" 2>/dev/null | cut -f1)
 first=$(echo "$samples" | head -1)
 py=$(head -1 "$(command -v wgs_skim)" | sed 's/^#!//')      # the Python wgs_skim is installed in (API check)
-tsv=$out/features.$lane.tsv
+tsv=$out/features.$lane${ONLY:+.rerun}.tsv
 echo -e "id\tfunction\tresult\tseconds\toutput\tcommand\tmissing" > "$tsv"
 fail=0
 
@@ -25,6 +26,10 @@ fail=0
 feat() {
     local id=$1 name=$2 pats=$3 what=$4; shift 4
     local d="$out/${id}_${name}" t0=$(date +%s) ok=ok missing="" cmd=()
+    if [ -n "${ONLY:-}" ]; then
+        [[ " $ONLY " == *" $id "* ]] || return 0
+        rm -rf "$d"
+    fi
     for x in "$@"; do cmd+=("${x//@/$d}"); done
     mkdir -p "$d"
     echo "[$id] $name ..." >&2

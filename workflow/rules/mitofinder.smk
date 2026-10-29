@@ -67,10 +67,15 @@ rule mitofinder_input:
         asm=mitofinder_assembly,
         ref=mitofinder_ref,
     output:
-        temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta"),
+        fasta=temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta"),
+        places=temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta.map.tsv"),
     params:
         min_len=lambda w: mitofinder_min_contig(w.src),
         factor=lambda w: 0 if w.src in MF_TRANSCRIPTS else config["mitofinder_cov_factor"],
+        # transcripts: candidates joined into one sequence (scripts/mitofinder_prefilter.py; false = each transcript
+        # on its own, as MitoFinder alone)
+        concat=lambda w: (f"--concat --code {config['genetic_code']} --name {w.sample}_mt_transcripts"
+                          if w.src in MF_TRANSCRIPTS and config["mitofinder_concat_transcripts"] else ""),
     log:
         f"{OUT}logs/mitofinder/{{src}}/{{sample}}.input.log",
     threads: 4
@@ -81,8 +86,8 @@ rule mitofinder_input:
     conda:
         "../envs/blast.yaml"
     shell:
-        "python {workflow.basedir}/scripts/mitofinder_prefilter.py {input.asm} {output} --min-len {params.min_len} "
-        "--factor {params.factor} --ref {input.ref} --threads {threads} > {log} 2>&1"
+        "python {workflow.basedir}/scripts/mitofinder_prefilter.py {input.asm} {output.fasta} --min-len {params.min_len} "
+        "--factor {params.factor} --ref {input.ref} --threads {threads} {params.concat} > {log} 2>&1"
 
 
 def mitofinder_inputs(wildcards):
@@ -92,7 +97,8 @@ def mitofinder_inputs(wildcards):
         d.update(r1=rules.fastp.output.r1.format(sample=s), r2=rules.fastp.output.r2.format(sample=s),
                  json=rules.fastp.output.json.format(sample=s))
     else:
-        d["assembly"] = rules.mitofinder_input.output[0].format(src=src, sample=s)
+        d["assembly"] = rules.mitofinder_input.output.fasta.format(src=src, sample=s)
+        d["places"] = rules.mitofinder_input.output.places.format(src=src, sample=s)
     return d
 
 
@@ -112,7 +118,7 @@ rule mitofinder:
     params:
         out=lambda w, output: str(Path(output.fasta).parent),
         data=lambda w, input: (f"-1 {input.r1} -2 {input.r2} --assembler {w.src}" if "r1" in input.keys()
-                               else f"-a {input.assembly}"),
+                               else f"-a {input.assembly} --places {input.places}"),
         pairs=config["mitofinder_max_pairs"],
         code=config["genetic_code"],
         trna=config["mitofinder_trna"],

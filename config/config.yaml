@@ -93,6 +93,8 @@ mitofinder_min_contig: 1000     # --min-contig-size for genome assemblies (MitoF
 mitofinder_min_contig_rna: 300  # ... for transcripts (rna, trinity): single-gene mt transcripts are short
 mitofinder_cov_factor: 5        # genome assemblies: only scaffolds >= this x the weighted median coverage (0 = all)
 mitofinder_max_pairs: 10000000  # MEGAHIT / metaSPAdes mode: the first N read pairs (0 = all)
+mitofinder_concat_transcripts: true   # transcripts (rna / trinity): candidates (blastx + dc-megablast vs the reference) joined into one
+                                      #   sequence for MitoFinder (sim5 S3 with a distant reference: 2 -> 12 genes); false = one by one
 mitofinder_blast: true          # contamination check: BLAST every gene of every sample (blast_db / online), flag
                                 #   genes whose best hit is another family than the sample's other genes
 mitofinder_blast_genes: all     # genes to check: all, or e.g. COX1,CYTB,rrnL

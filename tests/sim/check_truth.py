@@ -70,7 +70,7 @@ def main():
                     rows.append(row(fn, s, kind, f"{fas[0].name}: {cov:.1f}% of the unit, {pid:.2f}% identity",
                                     f"{t[f'{kind}_unit']} bp unit", cov >= 95 and pid >= 99))
             f = d / "assembly" / s / f"{s}.scaffolds.fasta"
-            if f.exists() and f.stat().st_size:
+            if f.exists() and f.stat().st_size and int(fn[:2]) < 30:     # 31-38: transcripts, not the genome
                 lens = fasta_lengths(f)
                 tot = sum(lens) / 1e6
                 rows.append(row(fn, s, "assembly", f"{tot:.1f} Mb, N50 {n50(lens)}, {len(lens)} scaffolds",
