@@ -20,13 +20,14 @@ wgs_skim = "wgs_skim.cli:main"
 [tool.setuptools.dynamic]
 version = { attr = "wgs_skim.__version__" }
 
-# workflow/, config/ and resources/ stay at the repository root (standard Snakemake layout) and are shipped
+# workflow/, nextflow/, config/ and resources/ stay at the repository root (standard Snakemake layout) and are shipped
 # inside the package so that `pip install` gives a working `wgs_skim run`.
 [tool.setuptools]
-package-dir = { "wgs_skim" = "src/wgs_skim", "wgs_skim.workflow" = "workflow", "wgs_skim.config" = "config", "wgs_skim.resources" = "resources" }
-packages = ["wgs_skim", "wgs_skim.workflow", "wgs_skim.config", "wgs_skim.resources"]
+package-dir = { "wgs_skim" = "src/wgs_skim", "wgs_skim.workflow" = "workflow", "wgs_skim.config" = "config", "wgs_skim.resources" = "resources", "wgs_skim.nextflow" = "nextflow" }
+packages = ["wgs_skim", "wgs_skim.workflow", "wgs_skim.config", "wgs_skim.resources", "wgs_skim.nextflow"]
 
 [tool.setuptools.package-data]
 "wgs_skim.workflow" = ["Snakefile", "rules/*.smk", "envs/*.yaml", "scripts/*.py", "schemas/*.yaml", "profiles/default/*.yaml"]
 "wgs_skim.config" = ["*.yaml", "*.md"]
-"wgs_skim.resources" = ["*.fasta", "rdna/*.fasta"]
+"wgs_skim.resources" = ["*.fasta", "rdna/*.fasta", "histone/*.fasta"]
+"wgs_skim.nextflow" = ["main.nf", "nextflow.config", "modules/*.nf", "bin/*.py"]
