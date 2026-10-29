@@ -105,7 +105,7 @@ def cmd_run(args, passthrough):
     conf = {"reads_dir": reads, "samples": Path(args.samples).resolve() if args.samples else None,
             "outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "blast_db": args.blast_db, "email": args.email,
             "busco_lineage": args.busco_lineage, "steps": args.steps,
-            "blast_mt": args.blast_mt, "blast_nr": args.blast_nr}
+            "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes}
     cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
     mem = args.mem_gb or int(machine_mem_gb() * 0.9)
     if mem:                                           # every rule declares mem_mb: jobs are scheduled by memory too
@@ -177,42 +177,59 @@ def compare_tools(prefix):
 
 
 def cmd_compare(args, passthrough):
-    """GetOrganelle vs other mitogenome assemblies, one sample or a batch; see workflow/scripts/compare_mt.py."""
+    """GetOrganelle vs other mitogenome assemblies: one sample directly; a batch (--results / --sheet) through
+    workflow/compare_batch.smk (Snakemake: scheduled by cores and memory, resumable). See scripts/compare_mt.py."""
+    tools = compare_tools(Path(args.conda_prefix))
+    if args.results or args.sheet:
+        out = Path(args.outdir).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        conf = [f"outdir={out}", f"tools={tools}", f"plot={'false' if args.no_plot else 'true'}"]
+        conf += [f"results={Path(args.results).resolve()}"] if args.results else [f"sheet={Path(args.sheet).resolve()}"]
+        conf += [f"samples={args.samples}"] if args.samples else []
+        cmd = [snakemake_exe(), "-s", str(workflow_root() / "workflow" / "compare_batch.smk"), "-d", str(out),
+               "--cores", str(args.cores), "--config", *conf]
+        mem = args.mem_gb or int(machine_mem_gb() * 0.9)
+        if mem:
+            cmd += ["--resources", f"mem_mb={int(mem * 1024)}"]
+        cmd += passthrough
+        print(f"[wgs_skim] {shlex.join(cmd)}", flush=True)
+        return subprocess.run(cmd).returncode
     env = dict(os.environ)
-    env["PATH"] = f"{compare_tools(Path(args.conda_prefix))}{os.pathsep}{env['PATH']}"
+    env["PATH"] = f"{tools}{os.pathsep}{env['PATH']}"
     cmd = [sys.executable, str(workflow_root() / "workflow" / "scripts" / "compare_mt.py"),
-           "-o", args.outdir, "--prefix", args.prefix, "-j", str(args.jobs)]
+           "-o", args.outdir, "--prefix", args.prefix]
     cmd += [x for b in args.other or [] for x in ("-b", b)]
     cmd += ["--no-plot"] if args.no_plot else []
-    cmd += [x for k in ("ref", "spades", "gb", "gff", "gfa", "results", "sheet", "samples") if getattr(args, k)
-            for x in (f"--{k}", getattr(args, k))]
+    cmd += [x for k in ("ref", "spades", "gb", "gff", "gfa") if getattr(args, k) for x in (f"--{k}", getattr(args, k))]
     return subprocess.run(cmd, env=env).returncode
 
 
 def cmd_nuclear(args, passthrough):
-    """rDNA + histones of every sample of a results directory; see workflow/scripts/nuclear_markers.py."""
-    prefix = Path(args.conda_prefix)
-    if not args.results and not args.status:
-        sys.exit("[wgs_skim] give the results directory: wgs_skim nuclear --results DIR -o OUT")
-
-    def env_with(*tools):                       # an environment of the workflow (or the user's) that has the tools
-        for d in sorted(prefix.glob("*/")) + sorted((Path.home() / "miniforge3" / "envs").glob("*/")):
-            if all((d / "bin" / t).exists() for t in tools):
-                return d / "bin"
-        sys.exit(f"[wgs_skim] no environment with {', '.join(tools)}: run `wgs_skim install` first")
-    go = env_with("get_organelle_from_reads.py", "bowtie2") / "get_organelle_from_reads.py"
-    py = env_with("exonerate", "cmsearch", "tblastn", "table2asn") / "python"
-    mitom = Path(args.mitom) if args.mitom else HOME / "db" / "mitom_nuc" / "Mitom"
-    if not (mitom / "mito_nuc.py").exists():
-        sys.exit(f"[wgs_skim] {mitom}: no MitoM with `mitom nuc` (--mitom, or run the workflow once)")
+    """rDNA + histones of every sample of an existing results directory: workflow/nuclear_batch.smk (Snakemake:
+    jobs scheduled by cores and memory, one log each, resumable); --status reads the output directory."""
     nm = str(workflow_root() / "workflow" / "scripts" / "nuclear_markers.py")
     if args.status:
-        return subprocess.run([str(py), nm, "status", "-o", args.outdir, "--markers", args.markers]).returncode
-    cmd = [str(py), nm, "batch",                     # MitoM's python: Biopython for the comparison
-           "--results", args.results, "-o", args.outdir, "--markers", args.markers, "-j", str(args.jobs),
-           "--mitom", str(mitom), "--mitom-python", str(py), "--getorganelle", str(go)]
-    cmd += (["--samples", args.samples] if args.samples else []) + ["--max-gb", args.max_gb]
-    return subprocess.run(cmd + passthrough).returncode
+        return subprocess.run([sys.executable, nm, "status", "-o", args.outdir, "--markers", args.markers]).returncode
+    if not args.results:
+        sys.exit("[wgs_skim] give the results directory: wgs_skim nuclear --results DIR -o OUT")
+    mitom = Path(args.mitom) if args.mitom else HOME / "db" / "mitom_nuc" / "Mitom"
+    if not (mitom / "mito_nuc.py").exists():
+        sys.exit(f"[wgs_skim] {mitom}: no MitoM with `mitom nuc` (--mitom, or `wgs_skim install`)")
+    out = Path(args.outdir).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    conf = [f"results={Path(args.results).resolve()}", f"outdir={out}", f"markers={args.markers}",
+            f"max_gb={args.max_gb}", f"mitom={mitom.resolve()}"] + ([f"samples={args.samples}"] if args.samples else [])
+    cmd = [snakemake_exe(), "-s", str(workflow_root() / "workflow" / "nuclear_batch.smk"), "--sdm", "conda",
+           "--conda-prefix", str(args.conda_prefix), "-d", str(out), "--cores", str(args.cores),
+           "--config", *conf]
+    mem = args.mem_gb or int(machine_mem_gb() * 0.9)
+    if mem:
+        cmd += ["--resources", f"mem_mb={int(mem * 1024)}"]
+    if args.dry_run:
+        cmd.append("-n")
+    cmd += passthrough
+    print(f"[wgs_skim] {shlex.join(cmd)}", flush=True)
+    return subprocess.run(cmd).returncode
 
 
 def cmd_build_blastdb(args, passthrough):
@@ -253,7 +270,10 @@ def main(argv=None):
                    help="run only these steps (and what they need): fastp, meangs, mito (MEANGS + GetOrganelle), "
                         "getorganelle (without MEANGS), nr (rDNA + histones), spades, busco, genome_size, annotate, "
                         "topology, blast, nuclear (rDNA + histones in the SPAdes assembly, copy numbers, vs "
-                        "GetOrganelle), summary (default: everything)")
+                        "GetOrganelle), trinity, rna (rnaSPAdes + Trinity + BUSCO), summary (default: everything)")
+    r.add_argument("--spades-modes", metavar="M[,M]",
+                   help="SPAdes modes: genome (default) and/or isolate, sc, meta, rna, rnaviral, plasmid, "
+                        "metaplasmid, metaviral, bio, sewage, corona (one assembly + BUSCO each)")
     r.add_argument("--blast-db", help="local nt database prefix (default: NCBI online BLAST)")
     r.add_argument("--blast-mt", metavar="Q[,Q]",
                    help="mitogenome BLAST queries: full and/or genes, e.g. cox1,16s,cytb (default cox1)")
@@ -290,7 +310,9 @@ def main(argv=None):
     m.add_argument("--results", help="batch: results directory (all samples with GetOrganelle + MitoFinder)")
     m.add_argument("--sheet", help="batch: sample sheet TSV with sample, ref, other, [spades, gb, gfa]")
     m.add_argument("--samples", help="batch: only these samples (comma-separated)")
-    m.add_argument("-j", "--jobs", type=int, default=2, help="batch: samples at a time (~7 GB memory each)")
+    m.add_argument("-j", "--cores", type=int, default=os.cpu_count(), help="batch: CPU cores for all jobs together")
+    m.add_argument("--mem-gb", type=int, default=0, help="batch: memory for all jobs (default 90%% of the machine; "
+                   "~8 GB per sample with a SPAdes graph)")
     m.add_argument("--no-plot", action="store_true", help="no figures (default: one SVG per comparison)")
     m.add_argument("-o", "--outdir", default="compare")
     m.add_argument("--prefix", default="sample")
@@ -303,8 +325,9 @@ def main(argv=None):
     n.add_argument("-o", "--outdir", default="nuclear_markers")
     n.add_argument("--samples", help="only these samples (comma-separated)")
     n.add_argument("--markers", default="rdna,histone")
-    n.add_argument("-j", "--jobs", type=int, default=0,
-                   help="samples at a time (default: from free memory and cores, 1-4; ~12 GB and 16 threads each)")
+    n.add_argument("-j", "--cores", type=int, default=os.cpu_count(), help="CPU cores for all jobs together")
+    n.add_argument("--mem-gb", type=int, default=0, help="memory for all jobs together (default 90%% of the machine)")
+    n.add_argument("-n", "--dry-run", action="store_true", help="only show what would run")
     n.add_argument("--max-gb", default="5,10", help="Gb of reads per GetOrganelle round (round 2, seeded with "
                    "round 1, only when round 1 does not close the unit)")
     n.add_argument("--mitom", help="MitoM checkout (default: the workflow's, <WGS_SKIM_HOME>/db/mitom_nuc/Mitom)")

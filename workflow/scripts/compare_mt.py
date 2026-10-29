@@ -460,53 +460,23 @@ def missing_inputs(job):
     return miss + (absent if not job["other"] else [])
 
 
-def run_job(job, out):
-    try:
-        return compare_sample(job["ref"], job["other"], out, job["sample"], job.get("spades"), job.get("gb"),
-                              job.get("gfa"), job.get("plot", True), job.get("gff"), job.get("graph_for"))
-    except Exception as e:  # one sample failing must not stop the batch; reported in the table
-        return [{"sample": job["sample"], "verdict": "error", "note": f"{type(e).__name__}: {e}"[:300]}], [], \
-            [f"{job['sample']}: error: {type(e).__name__}: {e}"], [], []
-
-
-def batch(jobs, out, threads, only=None, plot=True):
-    """All samples, `threads` at a time; per-sample files plus all.compare.tsv / all.diffs.tsv."""
-    from concurrent.futures import ProcessPoolExecutor
-    if only:
-        keep = set(only.split(","))
-        jobs = [j for j in jobs if j["sample"] in keep]
-    summaries, diffs, structs, gene_rows, todo = [], [], [], [], []
-    for j in jobs:
-        j["plot"] = plot
-        miss = missing_inputs(j)
-        if miss:
-            summaries.append({"sample": j["sample"], "verdict": "skipped", "note": "missing: " + ", ".join(miss)})
-            print(f"{j['sample']}: skipped (missing: {', '.join(miss)})")
-        else:
-            todo.append(j)
-    from concurrent.futures import as_completed
-    with ProcessPoolExecutor(max_workers=max(1, threads)) as ex:
-        futures = [ex.submit(run_job, j, out) for j in todo]
-        for fut in as_completed(futures):
-            s, d, lines, st, g = fut.result()
-            summaries += s
-            diffs += d
-            structs += st
-            gene_rows += g
-            print("\n".join(lines), flush=True)
-            write_tables(out, "all", summaries, diffs, structs, gene_rows)   # kept if the batch stops
-    order = {j["sample"]: i for i, j in enumerate(jobs)}
-    summaries.sort(key=lambda r: order.get(r["sample"], 0))
-    for rows in (diffs, structs, gene_rows):
-        rows.sort(key=lambda r: order.get(r["sample"], 0))
-    write_tables(out, "all", summaries, diffs, structs, gene_rows)
-    overview(out, summaries)
+def merge(out, samples, skipped=()):
+    """the per-sample tables of a batch (Snakemake: workflow/compare_batch.smk) -> all.*.tsv + all.compare.html;
+    skipped = [(sample, reason)] of samples without the inputs"""
+    tables = {"compare": [], "diffs": [], "structure": [], "genes": []}
+    for smp in samples:
+        for name in tables:
+            f = out / f"{smp}.{name}.tsv"
+            if f.exists() and f.stat().st_size:
+                tables[name] += list(csv.DictReader(open(f), delimiter="\t"))
+    tables["compare"] += [{"sample": smp, "verdict": "skipped", "note": why} for smp, why in skipped]
+    write_tables(out, "all", tables["compare"], tables["diffs"], tables["structure"], tables["genes"])
+    overview(out, tables["compare"])
     n = {}
-    for r in summaries:
+    for r in tables["compare"]:
         n[r["verdict"]] = n.get(r["verdict"], 0) + 1
-    print(f"[compare] {len(jobs)} sample(s), {len(summaries)} comparison(s): "
-          + ", ".join(f"{k} {v}" for k, v in n.items())
-          + f" -> {out}/all.compare.tsv, all.diffs.tsv, all.structure.tsv, all.genes.tsv, all.compare.html")
+    print(f"[compare] {len(samples) + len(skipped)} sample(s): " + ", ".join(f"{k} {v}" for k, v in n.items())
+          + f" -> {out}/all.compare.tsv, all.compare.html")
 
 
 def overview(out, summaries):
@@ -546,22 +516,24 @@ def main():
     ap.add_argument("--results", help="batch: results directory of a known layout (all samples found there)")
     ap.add_argument("--sheet", help="batch: sample sheet TSV (sample, ref, other, [spades, gb, gff, gfa])")
     ap.add_argument("--samples", help="batch: only these samples (comma-separated)")
-    ap.add_argument("-j", "--jobs", type=int, default=2,
-                    help="batch: samples at a time (each needs ~7 GB memory with --spades graphs; default 2)")
     ap.add_argument("--no-plot", action="store_true", help="no figures (default: one SVG per comparison)")
+    ap.add_argument("--merge", metavar="S1,S2", help="batch: merge the per-sample tables of these samples in -o")
+    ap.add_argument("--skipped", nargs="*", default=[], metavar="SAMPLE:REASON", help="with --merge")
+    ap.add_argument("--graph-for", help="label of the -b assembly the --spades graph belongs to (default the first)")
     ap.add_argument("-o", "--outdir", required=True)
     ap.add_argument("--prefix", default="sample")
     a = ap.parse_args()
     out = Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
-    if a.results or a.sheet:
-        batch(jobs_from_results(a.results) if a.results else jobs_from_sheet(a.sheet), out, a.jobs, a.samples,
-              not a.no_plot)
+    if a.merge is not None:
+        merge(out, [x for x in a.merge.split(",") if x], [tuple(x.split(":", 1)) for x in a.skipped])
         return
+    if a.results or a.sheet:
+        sys.exit("batches run through Snakemake: wgs_skim compare --results / --sheet (workflow/compare_batch.smk)")
     if not (a.ref and a.other):
         ap.error("give -a and -b (one sample), or --results / --sheet (batch)")
-    first = a.other[0].split("=", 1)[0] if "=" in a.other[0] and not Path(a.other[0]).exists() else \
-        Path(a.other[0]).stem
+    first = a.graph_for or (a.other[0].split("=", 1)[0] if "=" in a.other[0] and not Path(a.other[0]).exists()
+                            else Path(a.other[0]).stem)
     print("\n".join(compare_sample(a.ref, a.other, out, a.prefix, a.spades, a.gb, a.gfa, not a.no_plot, a.gff,
                                    first)[2]))
 

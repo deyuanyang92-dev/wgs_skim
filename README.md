@@ -141,6 +141,8 @@ they depend on run too, and finished ones are reused.
 | `topology` | read-based circular / linear check | mito, annotate |
 | `blast` | BLAST + GenBank taxonomy of mitogenome and rDNA | mito, nr (+ annotate for gene queries) |
 | `nuclear` | rDNA + histones in the SPAdes assembly, copy numbers, comparison with the GetOrganelle units | spades, busco, nr |
+| `trinity` | Trinity transcriptome assembly | fastp |
+| `rna` | transcriptome: rnaSPAdes + Trinity + BUSCO `-m transcriptome` on both | fastp |
 | `summary` | summary table and report; alone: of everything the results directory already has | – |
 
 `nr` also assembles and annotates the histone cluster. Aliases: `qc`, `mitogenome` / `meangs-getorganelle` (mito),
@@ -156,6 +158,15 @@ reuses what an earlier command in the same results directory already made, and w
 ```bash
 # QC only (fastp): clean reads + fastp.html per sample
 wgs_skim run -r rawdata/ --steps fastp                   # -> qc/<sample>/<sample>.R1.fq.gz, .fastp.html/.json
+
+# SPAdes in any mode (as spadesv3.5.5.py): genome (default) isolate sc meta rna rnaviral plasmid metaplasmid
+# metaviral bio sewage corona; several at once, each with BUSCO (-m transcriptome for rna / rnaviral)
+wgs_skim run -r rawdata/ --steps spades,busco --spades-modes genome,meta,plasmid   # -> assembly/<s>/<s>.meta.fasta ...
+wgs_skim run -r rawdata/ --steps spades --spades-modes isolate --config spades_careful=true spades_kmers=21,33,55
+
+# transcriptome (RNA-seq reads): rnaSPAdes and Trinity, BUSCO on each
+wgs_skim run -r rnaseq/ --steps rna                     # -> assembly/<s>/<s>.rna.fasta, <s>.trinity.fasta, *.busco.txt
+wgs_skim run -r rnaseq/ --steps trinity,busco --spades-modes rna --config trinity_extra="--min_contig_length 300"
 
 # SPAdes whole-genome assembly, then BUSCO on it
 wgs_skim run -r rawdata/ --steps spades                  # -> assembly/<sample>/<sample>.scaffolds.fasta
@@ -421,7 +432,8 @@ wgs_skim_results/
 ├── annotation/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
 ├── topology/<sample>/         read-based circular / linear check, end diagnosis
 ├── nuclear/<sample>/          rDNA + histone copies in SPAdes, consensus, copy_number.tsv, nuc_compare.tsv
-├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary
+├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary; other SPAdes modes <sample>.<mode>.fasta,
+│                              Trinity <sample>.trinity.fasta, each with <sample>.<mode>.busco.txt
 ├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
 ├── blast/blast_topn.tsv       COX1 / rDNA top hits with GenBank organism and taxonomy
 └── logs/  benchmarks/         one log and one runtime/memory record per job, in directories named by rule
@@ -435,7 +447,8 @@ wgs_skim_results/
 | `use_fastp_cleandata*.py`, `Fastp_Fastqc_mulitqc` | step `fastp` |
 | `Batch_assembly_of_genomes_using_GetOrganelle*.py`, `batch_getorganelle`, `batch_seeds*.py` (MEANGS → GetOrganelle) | steps `meangs`, `mito`, `getorganelle` (+ reseeded rounds, SPAdes scaffold fallback) |
 | `batch_obation_nr_using_getorg.py` (18S-28S), Hesionidae H3 seeds | step `nr` (rDNA + histone cluster, MitoM `.gbf`) |
-| `spadesv3*.py`, `fastp_spades_busco.py`, `busco2summary` | steps `spades`, `busco` (BUSCO line in the report) |
+| `spadesv3*.py` (wgs / rna / meta / bio / sewage / plasmid / metaviral / metaplasmid, --careful, --only-assembler, -k), `fastp_spades_busco.py`, `busco2summary` | steps `spades` + `busco` with `--spades-modes` (every SPAdes mode, one assembly + BUSCO each); BUSCO line in the report |
+| `trinity_batch3*.py`, rnaspades snakefile, snakemake_transcriptome_workflow | steps `trinity`, `rna` (rnaSPAdes + Trinity + BUSCO transcriptome); TransDecoder / annotation not included |
 | `jeyllfish_genome*.py`, `genome_size.py` | step `genome_size` |
 | `Mitoz-annotate` / `mitoz_get*.py`, `batch_mitos2.py` | step `annotate` (MitoM: protein genes, rRNA, tRNA, NCBI checks) |
 | `mt_circularize.py`, `check_circularity.pl`, MITObim `circules.py` | step `topology` (reads) and `wgs_skim circularize` (graph, no reads) |

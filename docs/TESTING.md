@@ -137,10 +137,9 @@ MitoM 自身的测试（`~/mybiosofts/Mitom/tests/`，mitotools 环境）：**48
 | 全新机器上从零安装（`wgs_skim install` 含数据库下载） | 未在干净机器上测试 |
 | 在线 NCBI BLAST（`-remote`） | 测试均用本地小库（`build-blastdb`） |
 | 集群（Slurm 等 executor） | 未测试 |
-| Nextflow 版本 | 尚未开发 |
 | 读深度图（旧脚本 using_bwa_draw_coverage） | 未移植（MitoM `mito_plot.py` 可画） |
 | `wgs_skim compare` 在最新代码上的真实数据重跑 | 单元测试覆盖；真实数据最后一次在 2026-10-28 |
-| 双样品快速回归（data2） | 见第 7 节 |
+| Nextflow 版本 | 开发中（见 README） |
 
 ---
 
@@ -160,6 +159,43 @@ tests/e2e.sh small/ e2e_out/
 
 ---
 
-## 7. 双样品快速回归（data2）
+## 7. 双样品快速回归（data2，`tests/e2e.sh data2 e2e2`）
 
-运行中，完成后补充结果。
+- 两个样品（`pisione`、`cwsc010`，不同物种，各 1 M 对 reads = 0.3 Gb），完整流程 **39/39 个任务，0 个错误，26 分钟**。
+- 逐样品检查 11 项输出（fastp、线粒体、MitoM 注释、rDNA、rDNA GenBank、组蛋白 GenBank、SPAdes、BUSCO、基因组大小、
+  核基因拷贝数、GetOrganelle vs SPAdes）+ BLAST、汇总表（2 行）、HTML 报告、`wgs_skim nuclear`、单元测试：**0 项失败**。
+- 线粒体在 0.3 Gb 下未闭合（cwsc010 8 954 bp、pisione 15 776 bp，topology `linear_low_reads`）：数据量太小，属预期；
+  这个数据集用于检查流程是否完整跑通，不用于评价组装质量。
+
+## 8. 批量管理：Snakemake
+
+- `wgs_skim run`、`wgs_skim nuclear --results`、`wgs_skim compare --results` 全部由 Snakemake 调度（核数 + 内存、每个任务
+  一个日志、断点续跑）。`nuclear`：小样品 8 个任务成功，再次运行 "Nothing to be done"（2.2 秒）；`compare`：CHY006/007/008
+  identical / consistent / consistent，CHY002 无 MitoFinder 结果被列为 skipped，110 秒。
+- SPAdes 各模式与 Trinity（`--spades-modes`、`--steps rna`）：干运行检查依赖图（rna = rnaSPAdes + Trinity + 4 个 BUSCO；
+  genome + meta + plasmid 各自组装 + BUSCO；未知模式报错并列出可用模式）；真实 RNA 双样品测试见第 9 节。
+
+## 9. 命令矩阵与转录组
+
+### 9.1 命令矩阵（`tests/cli_matrix.sh data2 e2e2`，33 项，全部通过，约 1 分钟）
+
+- 子命令：`--version`、`samples`（有 / 无参数）、`config`、`run` 无输入时的提示、每个子命令的 `-h`。
+- 每个 `--steps` 值的干运行，检查 Snakemake 将运行的规则：everything、fastp、meangs、mito、getorganelle、annotate、topology、
+  nr、spades、spades,busco、`--spades-modes genome,meta,plasmid,isolate`、rna、trinity、genome_size、nuclear、blast、summary 单独。
+- 错误输入：未知步骤、未知 SPAdes 模式（都给出可用值）；`--mem-gb 50` → `--resources mem_mb=51200`。
+- 对已完成结果：`circularize`（无 reads）、`compare` 单样品、`nuclear` 复用已有结果（Nothing to be done）、`nuclear --status`、
+  `nuclear -n`、单元测试。
+
+### 9.2 转录组（`wgs_skim run -r rna2 -o rna2_out --steps rna`）
+
+两个 RNA-seq 样品（A1、R1，各约 50 MB × 2，约 0.1 Gb）。rnaSPAdes（`--rna -k 21,33,55`）+ Trinity 2.15.2 + 各自 BUSCO（metazoa_odb12，`-m transcriptome`）。
+
+| 样品 | rnaSPAdes 转录本 | 时间 / 峰值内存 | BUSCO |
+|---|---|---|---|
+| A1 | 20 573 | 87 s / 1.3 GB | C:12.1% [S:11.9%, D:0.1%], F:22.8%, M:65.2%, n:672 |
+| R1 | 27 620 | 92 s / 1.2 GB | C:13.2% [S:12.9%, D:0.3%], F:29.8%, M:57.0%, n:672 |
+
+BUSCO 低是数据量太小（完整转录组通常需要 ≥ 2 Gb）所致；本测试检查流程本身。
+
+Trinity：第二阶段为每个 read 簇单独运行一次（A1 有 13 961 个簇），在机器被其他 SPAdes 任务占满时很慢（20 分钟约 7 %）。
+结果（转录本数、BUSCO）运行结束后补在这里。

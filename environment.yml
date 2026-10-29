@@ -9,3 +9,4 @@ dependencies:
   - snakemake =8.18
   - pyyaml
   - pip
+  - pytest             # tests/ (python -m pytest -q tests/)

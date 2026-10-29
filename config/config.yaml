@@ -27,7 +27,8 @@ busco_lineage: ""      # lineage name (downloaded once, e.g. metazoa_odb12) or p
 # ── Steps ─────────────────────────────────────────────────────────────────────
 # steps: run only some parts, comma separated; upstream steps they need run too (spades needs fastp ...).
 #   fastp | meangs | mito (MEANGS -> GetOrganelle -> reseeded rounds) | getorganelle (no MEANGS seed) | nr |
-#   spades | busco | genome_size | annotate | topology | blast | nuclear (rDNA + histones in the assembly) | summary
+#   spades | busco | trinity | rna (rnaSPAdes + Trinity + BUSCO) | genome_size | annotate | topology | blast |
+#   nuclear (rDNA + histones in the assembly) | summary
 #   e.g. steps: "fastp,spades,busco"     empty = everything switched on below
 steps: ""
 meangs: true           # MEANGS seed for GetOrganelle (false: GetOrganelle's own animal_mt seeds)
@@ -63,6 +64,18 @@ nuclear_max_gb: "5,10"  # Gb of reads per GetOrganelle round for rDNA / histones
 spades_min_clean_gb: 0           # skip SPAdes for samples with less clean data than this (0 = assemble all)
 spades_gib_per_gb: 6.5           # SPAdes memory estimate: GiB per Gb of clean data (annelids 5.3–6.1)
 spades_min_mem_gb: 32
+
+# ── SPAdes modes and Trinity (the user's spadesv3.5.5.py / trinity_batch3.1.py) ────────────────────────────
+spades_modes: "genome"           # comma separated: genome (whole-genome skim: BUSCO, nuclear markers, mt fallback) and
+                                 #   any SPAdes mode: isolate sc meta rna rnaviral plasmid metaplasmid metaviral bio
+                                 #   sewage corona -> assembly/<s>/<s>.<mode>.fasta + .<mode>.busco.txt
+spades_kmers: ""                 # -k for the non-genome modes ("" = SPAdes chooses)
+rnaspades_kmers: "21,33,55"      # -k of rna / rnaviral (the user's rnaspades snakefile); "auto" = SPAdes chooses
+spades_careful: false            # --careful (isolate, sc and plasmid modes only)
+spades_only_assembler: false     # --only-assembler for the non-genome modes (the genome mode always uses it)
+spades_mode_gib_per_gb: 5        # memory estimate of the non-genome modes: GiB per Gb of clean data (>= 16 GB)
+trinity_gib_per_gb: 6            # Trinity --max_memory from the clean data (>= 16 GB)
+trinity_extra: ""                # more Trinity options, e.g. "--min_contig_length 300"
 
 # ── Genome size ───────────────────────────────────────────────────────────────
 kmer_size: 21

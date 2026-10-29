@@ -1,0 +1,7 @@
+# Trinity de novo transcriptome assembly; 2.15.2 = the version of the user's trinity_batch3.1.py image
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - trinity =2.15.2

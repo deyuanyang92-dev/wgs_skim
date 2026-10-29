@@ -221,7 +221,6 @@ def test_reads_cap_and_completeness(tmp_path):
     assert nm.label_gene("MW622063 Hesionidae sp. A histone H3 (H3) gene, partial cds", "histone") == "H3"
     assert nm.label_gene("X53330.1 P.dumerilii histone gene cluster for core histones H2A, H2B, H3 and H4",
                          "histone") is None
-    assert 1 <= nm.default_jobs() <= 4
 
 
 def test_compare_and_status_from_consensus_dirs(tmp_path):

@@ -21,8 +21,10 @@ Subcommands (also used by the workflow rules, workflow/rules/nuclear.smk):
   assemble  GetOrganelle -F anonym of a multi-copy unit (--kind rdna | histone) from clean reads, in rounds
   annotate  `mitom nuc annotate` of a GetOrganelle result or SPAdes scaffolds -> <sample>.<kind>.gbf + MitoM tables
   compare   GetOrganelle vs SPAdes-MitoM per gene -> TSV
-  batch     every sample of an existing results directory (LAYOUTS), resumable: reuses finished assemblies, redoes an
-            annotation when MitoM changed (mitom.version)
+  merge     per-sample comparison tables -> summary.tsv
+  status    what a batch has done so far
+Batches: workflow/nuclear_batch.smk (every sample of an existing results directory, LAYOUTS; `wgs_skim nuclear`)
+and workflow/rules/nuclear.smk (within the workflow) - Snakemake schedules, logs and resumes.
 """
 import argparse
 import csv
@@ -31,14 +33,12 @@ import re
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from collect_fasta import clean  # noqa: E402
 
 RES = Path(__file__).resolve().parents[2] / "resources"
-JOB_GB, JOB_THREADS = 12, 16      # one sample at a time needs ~12 GB (GetOrganelle 1-5 GB, MitoM on SPAdes 2-8 GB)
 
 
 def log(msg):
@@ -46,17 +46,7 @@ def log(msg):
     print(f"[nuclear {time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def default_jobs(threads=JOB_THREADS):
-    """samples at a time from what the machine has now: memory (MemAvailable) and cores, 1-4"""
-    gb = 0
-    try:
-        for line in open("/proc/meminfo"):
-            if line.startswith("MemAvailable:"):
-                gb = int(line.split()[1]) / 1e6
-    except OSError:
-        pass
-    cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
-    return max(1, min(4, int(gb // JOB_GB) if gb else 4, cores // threads))
+
 GENES = {"rdna": ["18S", "ITS1", "5.8S", "ITS2", "28S"], "histone": ["H1", "H2A", "H2B", "H3", "H4"]}
 # bowtie2 options for GetOrganelle's seed reads: histone DNA of another family is too far from the bundled seed for
 # end-to-end mapping (HNP1sub, a Pisione: 391 bytes of seed reads, "Too few seed reads", no result; local
@@ -335,7 +325,8 @@ def write_rows(path, rows):
 # 03.spades).
 LAYOUTS = {
     "wgs_skim": {"samples": "qc/*", "r1": "qc/{s}/{s}.R1.fq.gz", "r2": "qc/{s}/{s}.R2.fq.gz",
-                 "rdna": "rdna/{s}/getorganelle", "scaffolds": "assembly/{s}/{s}.scaffolds.fasta",
+                 "rdna": "rdna/{s}/getorganelle", "histone": "histone/{s}/getorganelle",
+                 "scaffolds": "assembly/{s}/{s}.scaffolds.fasta",
                  "spades_mitom": "nuclear/{s}/mitom_nuc"},
     "wgs_skim_pipeline": {"samples": "01.fastp/*", "r1": "01.fastp/{s}/{s}.R1.clean.fastq.gz",
                           "r2": "01.fastp/{s}/{s}.R2.clean.fastq.gz", "rdna": "02.organelle/03_nr/{s}",
@@ -350,41 +341,6 @@ def layout(results):
         if dirs:
             return name, {s: {k: res / v.format(s=s) for k, v in lay.items() if k != "samples"} for s in dirs}
     sys.exit(f"[nuclear] {res}: no known results layout ({', '.join(LAYOUTS)})")
-
-
-def one_sample(job):
-    """Every step for one sample; returns (printed lines, comparison rows). Steps whose output exists are reused."""
-    s, p, a = job["sample"], job["paths"], job["args"]
-    out, lines, rows = Path(a.outdir), [], []
-    try:
-        # MitoM on the SPAdes scaffolds once for both markers (hours on a 2 Gb assembly; it was run per marker
-        # before: spades_mitom/<s> at the top, a per-marker <kind>/spades_mitom/<s> of an earlier run is reused)
-        scaffolds = p["scaffolds"] if p["scaffolds"].exists() and p["scaffolds"].stat().st_size else None
-        workflow_run = p.get("spades_mitom") if p.get("spades_mitom") and Path(p["spades_mitom"]).exists() else None
-        shared = None
-        for kind in a.markers:
-            go_dir = out / kind / "getorganelle" / s
-            # an assembly the results directory already has (rDNA) is round 1
-            fasta = getorganelle(kind, p["r1"] if p["r1"].exists() else None, p["r2"], go_dir, a.threads, a.max_gb,
-                                 given=p.get(kind), exe=a.getorganelle)
-            ann = out / kind / "annotation" / s
-            got = annotate(fasta, ann, kind, s, a.mitom, a.mitom_python) if fasta else "no GetOrganelle result"
-            legacy = out / kind / "spades_mitom" / s
-            sp = workflow_run or (legacy if (legacy / "mitom.version").exists() else None)
-            if not sp and scaffolds:
-                if shared is None:
-                    shared = out / "spades_mitom" / s
-                    annotate(scaffolds, shared, ",".join(a.markers), s, a.mitom, a.mitom_python, threads=12,
-                             gbf=False)
-                sp = shared
-            rows += compare(s, kind, ann if fasta else None, sp)
-            lines.append(f"{s} {kind}: GetOrganelle {got}" + ("" if sp else " (no SPAdes assembly)"))
-            note = (go_dir / "done").read_text().strip() if (go_dir / "done").exists() else "no GetOrganelle run"
-            log(f"{s}: {kind} done ({note})")
-    except Exception as e:      # one sample failing must not stop the batch; reported, and a row in summary.tsv
-        lines.append(f"{s}: error: {type(e).__name__}: {e}")
-        rows.append({"sample": s, "marker": kind, "gene": "", "verdict": f"error: {type(e).__name__}: {e}"[:200]})
-    return lines, rows
 
 
 README = """多拷贝核基因：rDNA（18S-ITS1-5.8S-ITS2-28S）与组蛋白（H1 H2A H2B H3 H4）  wgs_skim nuclear
@@ -407,9 +363,10 @@ def status(out, markers=("rdna", "histone"), samples=None):
     names = samples or sorted({d.name for k in markers for sub in ("getorganelle", "annotation")
                                for d in (out / k / sub).glob("*") if d.is_dir()})
     done = {}
-    if (out / "summary.tsv").exists():
-        for r in csv.DictReader(open(out / "summary.tsv"), delimiter="\t"):
-            done.setdefault((r["sample"], r["marker"]), []).append(r["verdict"])
+    for t in [out / "summary.tsv", *sorted((out / "compare").glob("*.tsv"))]:
+        if t.exists() and t.stat().st_size:
+            for r in csv.DictReader(open(t), delimiter="\t"):
+                done.setdefault((r["sample"], r["marker"]), []).append(r["verdict"])
     lines = []
     for s in names:
         parts = []
@@ -428,39 +385,6 @@ def status(out, markers=("rdna", "histone"), samples=None):
     return lines
 
 
-def batch(a):
-    name, samples = layout(a.results)
-    if a.samples:
-        keep = set(a.samples.split(","))
-        samples = {s: p for s, p in samples.items() if s in keep}
-    jobs = a.jobs or default_jobs(a.threads)
-    log(f"{a.results}: layout {name}, {len(samples)} sample(s), markers {','.join(a.markers)}, "
-        f"MitoM {mitom_version(a.mitom)}, {jobs} sample(s) at a time x {a.threads} threads")
-    out = Path(a.outdir)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "README.txt").write_text(README)
-    old = []                                            # rows of samples not run this time stay
-    if (out / "summary.tsv").exists():
-        old = [r for r in csv.DictReader(open(out / "summary.tsv"), delimiter="\t") if r["sample"] not in samples]
-    rows, n_done = [], 0
-    from concurrent.futures import as_completed
-    with ProcessPoolExecutor(max_workers=jobs) as ex:
-        futures = [ex.submit(one_sample, {"sample": s, "paths": p, "args": a}) for s, p in samples.items()]
-        for fut in as_completed(futures):
-            lines, r = fut.result()
-            rows += r
-            n_done += 1
-            print("\n".join(lines), flush=True)
-            # summary.tsv after every sample: progress is visible, a stopped batch keeps what it had
-            write_rows(out / "summary.tsv", sorted(old + rows, key=lambda r: (r["sample"], r["marker"])))
-            log(f"{n_done}/{len(samples)} samples done -> {out / 'summary.tsv'}")
-    v = {}
-    for r in rows:
-        v[r["verdict"]] = v.get(r["verdict"], 0) + 1
-    log(f"{len(rows)} gene rows: " + ", ".join(f"{k} {n}" for k, n in sorted(v.items()))
-        + f" -> {out / 'summary.tsv'}")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -470,8 +394,9 @@ def main():
     tools.add_argument("--getorganelle", default="get_organelle_from_reads.py")
     h = sub.add_parser("assemble", parents=[tools])
     h.add_argument("--kind", choices=GENES, required=True)
-    h.add_argument("-1", dest="r1", required=True)
-    h.add_argument("-2", dest="r2", required=True)
+    h.add_argument("-1", dest="r1", help="clean reads (optional with --given)")
+    h.add_argument("-2", dest="r2")
+    h.add_argument("--given", help="an existing GetOrganelle directory of this unit: round 1")
     h.add_argument("-o", "--outdir", required=True)
     h.add_argument("-t", "--threads", type=int, default=16)
     h.add_argument("--max-gb", default="5,10", help="Gb of reads per round (default 5,10: a second round only when the "
@@ -481,26 +406,23 @@ def main():
     h.add_argument("--seed", help="seed FASTA (default resources/<kind>)")
     h.add_argument("--label", help="label FASTA (default resources/<kind>)")
     an = sub.add_parser("annotate", parents=[tools])
-    an.add_argument("-i", "--fasta", required=True)
+    an.add_argument("-i", "--fasta", required=True,
+                    help="FASTA, or a GetOrganelle directory (its result; none: a 'no result' stamp)")
     an.add_argument("-o", "--outdir", required=True)
-    an.add_argument("--kind", choices=GENES, required=True)
+    an.add_argument("--kind", required=True, help="rdna, histone or rdna,histone (one MitoM run for both)")
     an.add_argument("--sample", required=True)
     an.add_argument("-t", "--threads", type=int, default=4)
+    an.add_argument("--no-gbf", action="store_true", help="no <sample>.<kind>.gbf (SPAdes scaffolds)")
     c = sub.add_parser("compare")
     c.add_argument("--sample", required=True)
     c.add_argument("--getorganelle-rdna")
     c.add_argument("--getorganelle-histone")
     c.add_argument("--spades", help="MitoM output on the SPAdes scaffolds (both markers or one)")
+    c.add_argument("--markers", default="rdna,histone")
     c.add_argument("-o", "--out", required=True)
-    b = sub.add_parser("batch", parents=[tools])
-    b.add_argument("--results", required=True, help="results directory of a known layout")
-    b.add_argument("-o", "--outdir", required=True)
-    b.add_argument("--samples", help="only these samples (comma-separated)")
-    b.add_argument("--markers", default="rdna,histone")
-    b.add_argument("-j", "--jobs", type=int, default=0,
-                   help="samples at a time (default: from free memory and cores, 1-4; each ~12 GB, 16 threads)")
-    b.add_argument("-t", "--threads", type=int, default=16)
-    b.add_argument("--max-gb", default="5,10", help="Gb of reads per GetOrganelle round")
+    m = sub.add_parser("merge", help="per-sample comparison tables -> one summary.tsv (+ README.txt)")
+    m.add_argument("tables", nargs="*")
+    m.add_argument("-o", "--out", required=True)
     st = sub.add_parser("status", help="what a batch has done so far (from its output directory)")
     st.add_argument("-o", "--outdir", required=True)
     st.add_argument("--markers", default="rdna,histone")
@@ -511,19 +433,31 @@ def main():
     if hasattr(a, "max_gb"):
         a.max_gb = [float(x) for x in a.max_gb.split(",") if x.strip()]
     if a.cmd == "assemble":
-        f = getorganelle(a.kind, a.r1, a.r2, a.outdir, a.threads, a.max_gb, a.seed, a.label, exe=a.getorganelle,
-                         kmers=a.kmers, rounds=a.rounds)
+        f = getorganelle(a.kind, a.r1 if a.r1 and Path(a.r1).exists() else None, a.r2, a.outdir, a.threads,
+                         a.max_gb, a.seed, a.label, given=a.given, exe=a.getorganelle, kmers=a.kmers, rounds=a.rounds)
         print(f or "no result")
     elif a.cmd == "annotate":
-        print(annotate(a.fasta, a.outdir, a.kind, a.sample, a.mitom, a.mitom_python, a.threads))
+        fasta = result_fasta(a.fasta) if Path(a.fasta).is_dir() else Path(a.fasta)
+        if not fasta or not fasta.stat().st_size:                # nothing assembled: a stamp, no MitoM run
+            Path(a.outdir).mkdir(parents=True, exist_ok=True)
+            (Path(a.outdir) / "mitom.version").write_text("no result\n")
+            print("no result")
+            return
+        print(annotate(fasta, a.outdir, a.kind, a.sample, a.mitom, a.mitom_python, a.threads, gbf=not a.no_gbf))
     elif a.cmd == "compare":
         rows = []
         for kind, d in (("rdna", a.getorganelle_rdna), ("histone", a.getorganelle_histone)):
-            rows += compare(a.sample, kind, d, a.spades)
+            if kind in a.markers.split(","):
+                rows += compare(a.sample, kind, d, a.spades)
+        if not rows:                                             # an empty table still says what was compared
+            rows = [{"sample": a.sample, "marker": m, "gene": "", "verdict": "no genes"} for m in a.markers.split(",")]
         write_rows(a.out, rows)
-    else:
-        a.markers = [m for m in a.markers.split(",") if m in GENES]
-        batch(a)
+    elif a.cmd == "merge":
+        rows = [r for t in sorted(a.tables) if Path(t).stat().st_size
+                for r in csv.DictReader(open(t), delimiter="\t")]
+        write_rows(a.out, rows)
+        (Path(a.out).parent / "README.txt").write_text(README)
+        print(f"{len(rows)} gene rows from {len(a.tables)} sample(s) -> {a.out}")
 
 
 if __name__ == "__main__":

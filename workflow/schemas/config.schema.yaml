@@ -38,6 +38,14 @@ properties:
   mt_from_spades: {type: boolean, default: true}
   mt_iter_max_data_gb: {type: number, minimum: 0, default: 20}
   nr_seed: {type: string, default: ""}
+  spades_modes: {type: string, default: "genome"}
+  spades_kmers: {type: [string, integer], default: ""}
+  rnaspades_kmers: {type: [string, integer], default: "21,33,55"}
+  spades_careful: {type: boolean, default: false}
+  spades_only_assembler: {type: boolean, default: false}
+  spades_mode_gib_per_gb: {type: number, minimum: 0, default: 5}
+  trinity_gib_per_gb: {type: number, minimum: 0, default: 6}
+  trinity_extra: {type: string, default: ""}
   nr_label: {type: string, default: ""}
   histone_seed: {type: string, default: ""}
   histone_label: {type: string, default: ""}

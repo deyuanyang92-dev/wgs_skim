@@ -1,0 +1,17 @@
+**wgs_skim**
+
+- [[首页|Home]]
+- [[安装|Installation]]
+- [[快速开始|Quick-start]]
+- [[输入数据|Input]]
+- [[步骤详解|Steps]]
+- [[线粒体|Mitogenome]]
+- [[核多拷贝基因|Nuclear-markers]]
+- [[SPAdes 各模式与转录组|Assembly-modes]]
+- [[BLAST 物种鉴定|BLAST]]
+- [[资源调度与续跑|Resources-and-resume]]
+- [[配置参数|Configuration]]
+- [[输出文件|Output]]
+- [[报错排查|Troubleshooting]]
+- [[测试|Testing]]
+- [[旧脚本对照|From-old-scripts]]

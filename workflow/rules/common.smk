@@ -35,9 +35,10 @@ else:
 # ── Steps: `steps` runs only some parts (e.g. "fastp,spades,busco"); empty = everything switched on ──────
 STEP_ALIASES = {"qc": "fastp", "meangs-getorganelle": "mito", "mitogenome": "mito", "rdna": "nr", "assembly": "spades",
                 "jellyfish": "genome_size", "genomescope": "genome_size", "mitoz": "annotate", "mitom": "annotate",
-                "nuc": "nuclear", "histone": "nr", "histones": "nr", "report": "summary"}
+                "nuc": "nuclear", "histone": "nr", "histones": "nr", "report": "summary",
+                "rna": "transcriptome", "rnaspades": "transcriptome"}
 STEPS_ALL = ["fastp", "meangs", "mito", "getorganelle", "nr", "spades", "busco", "genome_size", "annotate", "topology",
-             "blast", "nuclear", "summary"]
+             "blast", "nuclear", "trinity", "transcriptome", "summary"]
 STEPS = [STEP_ALIASES.get(x, x) for x in re.split(r"[,\s]+", str(config.get("steps") or "").strip()) if x]
 for x in STEPS:
     if x not in STEPS_ALL:
@@ -74,6 +75,11 @@ NR_SEED = config.get("nr_seed") or str(RES / "rdna" / "seed.fasta")
 NR_LABEL = config.get("nr_label") or str(RES / "rdna" / "label.fasta")
 HIST_SEED = config.get("histone_seed") or str(RES / "histone" / "seed.fasta")
 HIST_LABEL = config.get("histone_label") or str(RES / "histone" / "label.fasta")
+# SPAdes modes to run (genome = rule spades; others = rule spades_mode, transcriptome.smk); `--steps rna` = rnaSPAdes
+MODES = [m.strip() for m in str(config["spades_modes"]).split(",") if m.strip()]
+if STEPS and "transcriptome" in STEPS:
+    MODES = list(dict.fromkeys([m for m in MODES if m != "genome"] + ["rna"]))
+OTHER_MODES = [m for m in MODES if m != "genome"]
 
 if STEPS and set(STEPS) == {"summary"}:
     def have(pattern):
@@ -139,13 +145,20 @@ def final_outputs():
             "mito": [rules.mt_select.output.fasta],
             "getorganelle": [rules.mt_select.output.fasta],
             "nr": [rules.nr_annotate.output.gb, rules.histone_annotate.output.gb],
-            "spades": [rules.spades.output.scaffolds],
-            "busco": [rules.busco.output.summary],
+            "spades": ([rules.spades.output.scaffolds] if "genome" in MODES else [])
+            + [rules.spades_mode.output.fasta.replace("{mode}", m) for m in OTHER_MODES],
+            "busco": ([rules.busco.output.summary] if "genome" in MODES else [])
+            + [rules.busco_assembly.output.summary.replace("{asm}", m) for m in OTHER_MODES],
+            "trinity": [rules.trinity.output.fasta],
             "genome_size": [rules.genomescope.output.summary],
             "annotate": [rules.mitom_annotate.output.gb],
             "topology": [rules.topology.output.tsv],
             "nuclear": [rules.nuc_copies.output.tsv, rules.nuc_compare.output.tsv],
+            "transcriptome": [rules.busco_assembly.output.summary.replace("{asm}", a)
+                              for a in [m for m in OTHER_MODES if m in ("rna", "rnaviral")] + ["trinity"]],
         }
+        if "busco" in STEPS and "trinity" in STEPS:
+            targets["busco"].append(rules.busco_assembly.output.summary.replace("{asm}", "trinity"))
         out = [f for x in STEPS for t in targets.get(x, []) for f in expand(t, sample=s)]
         if "blast" in STEPS:
             out.append(rules.blast.output.tsv)
@@ -155,6 +168,8 @@ def final_outputs():
     out = [f"{OUT}summary/samples.tsv"]
     if config["mito"]:
         out += expand(f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
+    if config["assembly"]:
+        out += expand([rules.busco_assembly.output.summary.replace("{asm}", m) for m in OTHER_MODES], sample=s)
     if config["nr"]:
         out += expand(f"{OUT}rdna/{{sample}}/{{sample}}.nr.fasta", sample=s)
         out += expand([rules.nr_annotate.output.gb, rules.histone_annotate.output.gb], sample=s)
