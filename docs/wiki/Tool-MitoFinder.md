@@ -23,7 +23,9 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 
 ## 参考 `--ref`
 
-近缘物种的线粒体 GenBank（一个 .gb 文件可含多条记录，MitoFinder 每个基因选最相近的），必须带基因注释。
+近缘物种的线粒体 GenBank，必须带基因注释。`--ref` 可给多个文件或一个目录，自动合并成一个多记录 GenBank
+（MitoFinder 每个基因选最相近的参考）。**建议给几个近缘种**：模拟测试（sim5）中，参考是另一个科的一条线粒体时，
+远缘样品只找到 12–13 / 15 个基因（缺 ND2、ND4L、rrnL）；换成 5 个近缘种（不含被测物种本身）→ 15 / 15。
 在组合 `meangs-getorganelle,spades-mitofinder` 中默认用该样品自己的 MitoM 注释作参考。
 
 ## 送给 MitoFinder 之前的过滤
@@ -31,8 +33,16 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 - 全基因组组装（spades / given）：只保留 ≥ 1000 bp、k-mer 覆盖度 ≥ 5 × 长度加权中位覆盖度的 scaffold
   （线粒体比核基因组深几十到几百倍；来自旧脚本 spades_mitofinder.py：CHY006 的 2 Gb 组装 → 3 871 条，MitoFinder 5 分钟、
   1 条线粒体 contig，环化检查才会运行）。没有 SPAdes 覆盖度信息的组装只按长度过滤。`mitofinder_cov_factor`（0 = 不按覆盖度）。
-- 转录本（rnaspades / trinity）：只按长度过滤，`mitofinder_min_contig_rna`（默认 300 bp：单个线粒体基因的转录本常短于
-  MitoFinder 默认的 1000 bp）。
+- 低覆盖度：参考序列 BLAST 命中的 scaffold 不论覆盖度都保留（小数据量时线粒体 scaffold 可能低于覆盖度阈值：
+  cwsc010 子样本的线粒体只有 1.5–2.9×，阈值 6.3×，原来全部被滤掉，MitoFinder 什么也找不到）。
+- 转录本（rnaspades / trinity）：长度 ≥ `mitofinder_min_contig_rna`（默认 300 bp），并且**把候选线粒体转录本拼成一条序列**
+  （`mitofinder_concat_transcripts`，默认开）：MitoFinder 用核苷酸 BLAST 判断哪些 contig 是线粒体，一条完整线粒体靠几个保守基因
+  就能通过，然后整条注释；但每个转录本只有一个基因，必须单独通过，参考较远时大多通不过（sim5 S3：15 个基因只找到 2 个）。
+  wgs_skim 先用 blastx（参考的蛋白）和 dc-megablast 挑出候选转录本，以 200 个 N 隔开连成一条，交给 MitoFinder
+  （S3：2 → 12 个基因；其他样品 12–14 个），再把每个基因映射回它所在的转录本。MitoFinder 每条序列每个基因只注释一次，
+  同一基因的其他转录本（另一个异构体，或污染物的拷贝）作为额外拷贝保留（`<s>.mitofinder.extra_copies.fasta`，
+  汇总中为 `<样品>_copyN`），污染检查因此仍能看到它们。`--config mitofinder_concat_transcripts=false` = 旧方式（逐条）。
+  ATP8（约 160 bp）短于 300 bp，转录本中一般找不到。
 
 ## 实际命令与软件
 
@@ -47,7 +57,9 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 
 | 文件 | 内容 |
 |---|---|
-| `<s>/<s>.mitofinder.fasta`、`.gb` | 该样品找到的全部线粒体 contig 及注释 |
+| `<s>/<s>.mitofinder.fasta`、`.gb` | 该样品找到的全部线粒体 contig 及注释（转录本：带基因的转录本） |
+| `<s>/<s>.mitofinder.transcripts.tsv` | （转录本）每个注释的基因在哪条转录本、位置 |
+| `<s>/<s>.mitofinder.extra_copies.fasta` | （转录本）MitoFinder 未注释的同一基因的其他转录本 |
 | `<s>/Final_Results/` | MitoFinder 原始结果（基因 NT / AA、.infos、.png、tRNA） |
 | `mitofinder_summary.tsv` | 每个样品：contig 数、总长、是否环化、蛋白基因 / rRNA / tRNA 数、每个基因的长度（N = 未找到） |
 | `mitofinder_contigs.tsv` | 每条线粒体 contig：原始 contig 名、长度、GC、环化 |
@@ -69,6 +81,7 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 | `no close reference` | 同科（或别的科）但一致度低：数据库中没有近缘序列，不是污染 |
 | `partial hit` | 命中只覆盖基因 < 50 %，不计入判断 |
 | `possible contamination` | 最佳命中是**别的科**且一致度 ≥ 85 %：污染物与其来源高度相似 |
+| `possible contamination`（完整线粒体规则） | 最佳命中是某物种的**完整线粒体**且 ≥ 97 %，但该样品其他基因都不与这条线粒体相似（≥ 90 %）：真是这个物种的话，其他基因也应命中它。少数基因时多数投票会把污染物当成样品本身（sim5 S5：只有 5 个基因，污染的 Nephtys COX1 100 % 曾被判为样品的科），这条规则不受投票影响 |
 
 输出 `mitofinder/<来源>/blast/`：`samples_check.tsv`（每个样品：多数科与物种、一致的基因数、被标记的基因、结论）、
 `genes_check.tsv`（每个样品每个基因：最佳命中、物种、科、一致度、覆盖度、结论）、`blast_topn.tsv`（全部命中）。
@@ -76,6 +89,9 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 实测（MJ20260820041 CHY006–008 的 MitoFinder 结果，本地后生动物库，45 个基因 105 s）：nt 中没有近缘种（COX1 最佳 82 %
 *Travisia*，Opheliidae），部分基因以 72–83 % 命中果蝇、鱼、芋螺等 → 判为 "no close reference"，不误报；把一个样品的 COX1
 换成 *Nephtys*（另一科）的 COX1 → 判为 `possible contamination: COX1 (Nephtyidae, 93.6%)`。
+
+模拟测试（sim5，`tests/sim/`）：S5 的 RNA 中加入 Nephtys（EU293739）的 COX1、CYTB → 报 `possible contamination: COX1`；
+其余 4 个样品不报（S4 的 rrnS 88.7 % 命中 *Micronephthys*，同科近缘属，不是同一物种，不报）。
 
 关闭：`--no-check`（工具）或 `--config mitofinder_blast=false`；只查部分基因：`--config mitofinder_blast_genes=COX1,CYTB`。
 
