@@ -29,7 +29,7 @@ res/
 | `mt_length`、`mt_circular` | 线粒体长度、是否成环 | 8954、no |
 | `mt_source` | 来源：GetOrganelle 第几轮（停止原因）或 SPAdes | GetOrganelle round1 (rounds exhausted) |
 | `mt_genes` | MitoM 找到的基因（完整的动物线粒体：13 PCG / 22 tRNA / 2 rRNA） | 9 PCG / 13 tRNA / 2 rRNA |
-| `mt_topology`、`mt_end_diagnosis` | reads 检查的结论（每条序列一个），末端为什么没接上（见 [线粒体](Mitogenome.md)） | linear_low_reads… |
+| `mt_topology`、`mt_end_diagnosis` | reads 检查的结论（每条序列一个），末端为什么没接上（见 [线粒体](Combo-mitogenome.md)） | linear_low_reads… |
 | `nr_length`、`nr_topology` | rDNA 单元长度、拓扑 | 8004、circular |
 | `spades_n50`、`spades_total_mb`、`busco` | SPAdes N50、总长、BUSCO | 274、44.3、C:0.0% |
 | `genome_size_mb`、`heterozygosity_pct` | GenomeScope2 | 0.3、3.85（数据太少，不可信） |

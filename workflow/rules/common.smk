@@ -25,41 +25,70 @@ for key, value in TAXA[config["taxon"]].items():
 # ── Samples: sample sheet or automatic detection in reads_dir ────────────────
 if config.get("samples"):
     SAMPLES = read_sheet(config["samples"])
-    GIVEN = sheet_columns(config["samples"], ["scaffolds"])   # optional: an existing SPAdes assembly per sample
+    GIVEN = sheet_columns(config["samples"], ["scaffolds", "mitogenome"])   # optional: existing files per sample
 elif config.get("reads_dir"):
     SAMPLES = find_pairs(config["reads_dir"])
     GIVEN = {}
 else:
     raise WorkflowError("give the reads directory: --config reads_dir=/path/to/rawdata (or samples=sheet.tsv)")
+# samples with an assembly / a mitogenome made elsewhere: linked instead of assembled (rules assembly_given,
+# mt_given), so BUSCO, MitoFinder, MitoM and BLAST run on them without reads (wgs_skim busco / mitofinder / mitom -i)
+GIVEN_ASM = sorted(s for s, g in GIVEN.items() if "scaffolds" in g)
+GIVEN_MT = sorted(s for s, g in GIVEN.items() if "mitogenome" in g)
+NO_READS = sorted(s for s, (r1, r2) in SAMPLES.items() if not r1)
+
+
+def one_of(names):
+    """wildcard constraint matching exactly these samples (nothing when empty)"""
+    return "|".join(re.escape(x) for x in names) or "(?!x)x"
 
 # ── Steps: `steps` runs only some parts (e.g. "fastp,spades,busco"); empty = everything switched on ──────
-STEP_ALIASES = {"qc": "fastp", "meangs-getorganelle": "mito", "mitogenome": "mito", "rdna": "nr", "assembly": "spades",
+STEP_ALIASES = {"qc": "fastp", "mitogenome": "mito", "rdna": "nr", "assembly": "spades",
                 "jellyfish": "genome_size", "genomescope": "genome_size", "mitoz": "annotate", "mitom": "annotate",
                 "nuc": "nuclear", "histone": "nr", "histones": "nr", "report": "summary",
-                "rna": "transcriptome", "rnaspades": "transcriptome"}
-STEPS_ALL = ["fastp", "meangs", "mito", "getorganelle", "nr", "spades", "busco", "genome_size", "annotate", "topology",
-             "blast", "nuclear", "trinity", "transcriptome", "summary"]
-STEPS = [STEP_ALIASES.get(x, x) for x in re.split(r"[,\s]+", str(config.get("steps") or "").strip()) if x]
+                "rna": "transcriptome"}
+# combinations (the recommended ones): name -> steps
+COMBOS = {"meangs-getorganelle": ["mito"],                     # mitogenome, reseeded rounds until circular
+          "spades-mitofinder": ["spades", "mitofinder"],       # mitogenome from the whole-genome assembly
+          "rnaspades-mitofinder": ["rnaspades", "mitofinder"], # mt genes from RNA-seq (rnaSPAdes transcripts)
+          "trinity-mitofinder": ["trinity", "mitofinder"],     # mt genes from RNA-seq (Trinity transcripts)
+          "spades-busco": ["spades", "busco"],                 # whole genome
+          "fastp-spades-busco": ["fastp", "spades", "busco"],
+          "rnaspades-busco": ["rnaspades", "busco"],           # transcriptome (recommended)
+          "trinity-busco": ["trinity", "busco"]}               # transcriptome
+STEPS_ALL = ["fastp", "meangs", "mito", "getorganelle", "nr", "spades", "rnaspades", "busco", "genome_size",
+             "annotate", "topology", "mitofinder", "blast", "nuclear", "trinity", "transcriptome", "summary"]
+STEPS = []
+for x in re.split(r"[,\s]+", str(config.get("steps") or "").strip()):
+    if x:
+        STEPS += COMBOS.get(x, [STEP_ALIASES.get(x, x)])
 for x in STEPS:
     if x not in STEPS_ALL:
-        raise WorkflowError(f"unknown step '{x}'; choose from: {', '.join(STEPS_ALL)}")
+        raise WorkflowError(f"unknown step '{x}'; choose from: {', '.join(STEPS_ALL)}; "
+                            f"combinations: {', '.join(COMBOS)}")
 if STEPS:
     want = set(STEPS)
-    genes_wanted = any(x.strip() not in ("", "full") for x in f"{config['blast_mt']},{config['blast_nr']}".split(","))
+    genes_wanted = any(x.strip().lower() not in ("", "full", "none")
+                       for x in f"{config['blast_mt']},{config['blast_nr']}".split(","))
     config["annotate"] = bool(want & {"annotate", "topology"}) or ("blast" in want and genes_wanted)
     config["topology"] = "yes" if "topology" in want else "no"
     config["blast"] = "blast" in want
-    config["mito"] = bool(want & {"mito", "getorganelle", "annotate", "topology", "blast"})
-    config["nr"] = bool(want & {"nr", "blast", "nuclear"})
-    config["assembly"] = bool(want & {"spades", "busco", "nuclear"})
+    blast_mt, blast_nr = (str(config[k]).strip().lower() not in ("", "none") and "blast" in want
+                          for k in ("blast_mt", "blast_nr"))
+    config["mito"] = bool(want & {"mito", "getorganelle", "annotate", "topology"}) or blast_mt
+    config["nr"] = bool(want & {"nr", "nuclear"}) or blast_nr
+    config["assembly"] = bool(want & {"spades", "rnaspades", "busco", "nuclear"})
+    config["mitofinder"] = "mitofinder" in want
+    if config["mitofinder"] and config["mito"] and not config["mitofinder_ref"]:
+        config["annotate"] = True                       # the sample's MitoM annotation is MitoFinder's reference
     config["nuc_markers"] = "nuclear" in want
     config["genome_size"] = "genome_size" in want
     if "getorganelle" in want and not want & {"mito", "meangs"}:
         config["meangs"] = False                                     # GetOrganelle with its own animal_mt seeds
 
 # BLAST queries: "full" (the whole assembled sequence) and/or genes cut from the annotations
-BLAST_MT = [x.strip() for x in str(config["blast_mt"]).split(",") if x.strip()]
-BLAST_NR = [x.strip() for x in str(config["blast_nr"]).split(",") if x.strip()]
+BLAST_MT = [x.strip() for x in str(config["blast_mt"]).split(",") if x.strip().lower() not in ("", "none")]
+BLAST_NR = [x.strip() for x in str(config["blast_nr"]).split(",") if x.strip().lower() not in ("", "none")]
 
 # topology: auto (only linear mitogenomes) | yes | no; YAML yes/no/true/false arrive as booleans
 TOPOLOGY = {True: "yes", False: "no"}.get(config["topology"], str(config["topology"]))
@@ -79,6 +108,8 @@ HIST_LABEL = config.get("histone_label") or str(RES / "histone" / "label.fasta")
 MODES = [m.strip() for m in str(config["spades_modes"]).split(",") if m.strip()]
 if STEPS and "transcriptome" in STEPS:
     MODES = list(dict.fromkeys([m for m in MODES if m != "genome"] + ["rna"]))
+if STEPS and "rnaspades" in STEPS:                    # rnaSPAdes alone (the rna mode); `spades` too keeps genome
+    MODES = list(dict.fromkeys((MODES if "spades" in STEPS else [m for m in MODES if m != "genome"]) + ["rna"]))
 OTHER_MODES = [m for m in MODES if m != "genome"]
 
 if STEPS and set(STEPS) == {"summary"}:
@@ -149,7 +180,9 @@ def final_outputs():
             + [rules.spades_mode.output.fasta.replace("{mode}", m) for m in OTHER_MODES],
             "busco": ([rules.busco.output.summary] if "genome" in MODES else [])
             + [rules.busco_assembly.output.summary.replace("{asm}", m) for m in OTHER_MODES],
+            "rnaspades": [rules.spades_mode.output.fasta.replace("{mode}", "rna")],
             "trinity": [rules.trinity.output.fasta],
+
             "genome_size": [rules.genomescope.output.summary],
             "annotate": [rules.mitom_annotate.output.gb],
             "topology": [rules.topology.output.tsv],
@@ -160,12 +193,23 @@ def final_outputs():
         if "busco" in STEPS and "trinity" in STEPS:
             targets["busco"].append(rules.busco_assembly.output.summary.replace("{asm}", "trinity"))
         out = [f for x in STEPS for t in targets.get(x, []) for f in expand(t, sample=s)]
+        if "mitofinder" in STEPS:
+            out += mitofinder_targets(rules.mitofinder.output.fasta)
+            srcs = sorted({x for s_ in SAMPLES for x in mitofinder_sources(s_)})
+            out += [rules.mitofinder_summary.output.tsv.format(src=x) for x in srcs]
+            if config["mitofinder_blast"]:
+                out += [rules.mitofinder_blast.output.samples.format(src=x) for x in srcs]
         if "blast" in STEPS:
             out.append(rules.blast.output.tsv)
         if "summary" in STEPS:
             out.append(rules.summary.output.tsv)
         return out
     out = [f"{OUT}summary/samples.tsv"]
+    if config["mitofinder"]:
+        srcs = sorted({x for s_ in SAMPLES for x in mitofinder_sources(s_)})
+        out += [rules.mitofinder_summary.output.tsv.format(src=x) for x in srcs]
+        if config["mitofinder_blast"]:
+            out += [rules.mitofinder_blast.output.samples.format(src=x) for x in srcs]
     if config["mito"]:
         out += expand(f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
     if config["assembly"]:

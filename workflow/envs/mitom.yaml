@@ -16,5 +16,7 @@ dependencies:
   - hmmer =3.4
   - mafft =7.526
   - openjdk =25
+  - matplotlib       # genome maps; without it MitoM skips them silently
+  - scikit-learn =1.6.1   # MitoM-ML tRNA caller; without it MitoM falls back to MiTFi silently
   - git
   - wget

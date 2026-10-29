@@ -15,7 +15,7 @@ HEAD = """# 配置
 
 ABOVE = {   # keys whose explanation is the comment block above them
     "taxon": "annelid / mollusc / fish / crustacean：同时设定 MEANGS 类群、线粒体遗传密码、MitoM 类群、BUSCO 谱系（下面 4 个键可单独覆盖）",
-    "steps": "只运行部分步骤（逗号分隔），所需的上游步骤自动加入；可用值见 [步骤](Steps)；空 = 下面打开的全部",
+    "steps": "只运行部分步骤（逗号分隔），所需的上游步骤自动加入；单个步骤 fastp meangs mito getorganelle nr spades rnaspades busco trinity rna genome_size annotate topology mitofinder blast nuclear summary，或组合 meangs-getorganelle spades-mitofinder spades-busco fastp-spades-busco rnaspades-busco trinity-busco（见 [组合流程](Combinations.md)）；空 = 下面打开的全部",
 }
 lines = (Path(__file__).resolve().parents[3] / "config" / "config.yaml").read_text().splitlines()
 out, in_section = [HEAD], False

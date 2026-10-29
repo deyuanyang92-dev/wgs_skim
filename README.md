@@ -125,6 +125,42 @@ ranked 2nd-5th for rDNA here, behind the same top hit; point `blast_db` at full 
 such an assembly. Building needs a temporary FASTA of ~210 GB (deleted at the end) and several hours; makeblastdb
 alone took 1.7 h here.
 
+### One tool on its own, for a whole batch
+
+Every tool has its own command. It runs on every sample of a directory (scheduled by Snakemake, one log per job,
+resumable); reads tools use the reads as they are (already clean; `--qc` cleans them with fastp first), FASTA
+tools take files or directories with `-i` (sample = file name; `--split-by-id` splits one merged FASTA by header).
+
+```bash
+wgs_skim fastp        -r raw/        -o qc/                        # fastp cleaning + report
+wgs_skim meangs       -r clean/      -o meangs/                    # MEANGS mitochondrial seed
+wgs_skim getorganelle -r clean/      -o go/ [--meangs] [--rounds 3] [--target mt|nr]
+wgs_skim spades       -r clean/      -o asm/ [--mode genome,rna,meta,plasmid,...]
+wgs_skim trinity      -r clean/      -o trinity/
+wgs_skim genome-size  -r clean/      -o gs/                        # jellyfish + GenomeScope2
+wgs_skim busco        -i assemblies/ -o busco/ [-m genome|transcriptome|proteins] [-l lineage]
+wgs_skim mitofinder   -i assemblies/ -o mf/ --ref related.gb      # or -r reads/ [--assembler megahit|metaspades|spades|rnaspades|trinity]
+wgs_skim mitom        -i mitogenomes/ -o mitom/                    # MitoM annotation
+wgs_skim blast        -i seqs/       -o blast/ [--genes full|cox1,...] [--db local_db]
+```
+
+Common options: `-j` cores and `--mem-gb` memory for all jobs together, `-t` taxon preset, `-n` dry run,
+`--config KEY=VALUE`, anything after `--` to Snakemake. Chinese manual per tool: [docs/wiki/Tools.md](docs/wiki/Tools.md).
+
+### Combinations (recommended)
+
+| goal | combination | `--steps` |
+|---|---|---|
+| mitogenome | MEANGS-GetOrganelle, reseeded rounds until circular | `meangs-getorganelle` |
+| mitogenome (second method) | SPAdes-MitoFinder (reference: `--mitofinder-ref`, or the sample's own MitoM annotation with `meangs-getorganelle`) | `spades-mitofinder` |
+| whole genome | SPAdes-BUSCO (fastp first) | `spades-busco` / `fastp-spades-busco` |
+| transcriptome | rnaSPAdes-BUSCO (recommended), Trinity-BUSCO; both: `rna` | `rnaspades-busco` / `trinity-busco` |
+| mt genes from RNA-seq | rnaSPAdes-MitoFinder, Trinity-MitoFinder; all samples gathered per gene (`mitofinder/<source>/genes/`) | `rnaspades-mitofinder` / `trinity-mitofinder` |
+
+```bash
+wgs_skim run -r raw/ -o res/ --steps meangs-getorganelle,spades-mitofinder,spades-busco
+```
+
 ### Running single steps
 
 `--steps` (or `steps:` in a config file, `--config steps=...` with Snakemake) runs only the named steps; the steps
@@ -144,11 +180,13 @@ they depend on run too, and finished ones are reused.
 | `topology` | read-based circular / linear check | mito, annotate |
 | `blast` | BLAST + GenBank taxonomy of mitogenome and rDNA | mito, nr (+ annotate for gene queries) |
 | `nuclear` | rDNA + histones in the SPAdes assembly, copy numbers, comparison with the GetOrganelle units | spades, busco, nr |
+| `rnaspades` | rnaSPAdes (SPAdes `--rna`) | fastp |
+| `mitofinder` | MitoFinder on the SPAdes assembly (or its own MEGAHIT assembly) | spades, (annotate as reference) |
 | `trinity` | Trinity transcriptome assembly | fastp |
 | `rna` | transcriptome: rnaSPAdes + Trinity + BUSCO `-m transcriptome` on both | fastp |
 | `summary` | summary table and report; alone: of everything the results directory already has | – |
 
-`nr` also assembles and annotates the histone cluster. Aliases: `qc`, `mitogenome` / `meangs-getorganelle` (mito),
+`nr` also assembles and annotates the histone cluster. Aliases: `qc`, `mitogenome` (mito),
 `rdna` / `histone` / `histones` (nr), `assembly` (spades), `jellyfish` / `genomescope` (genome_size), `mitom` / `mitoz`
 (annotate), `nuc` (nuclear), `report` (summary).
 

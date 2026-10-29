@@ -23,6 +23,8 @@ import compare_mt  # noqa: E402
 import nuclear_markers as nm  # noqa: E402
 import plot_compare  # noqa: E402
 import samples  # noqa: E402
+import mitofinder_check  # noqa: E402
+import mitofinder_summary  # noqa: E402
 import seqtools  # noqa: E402
 import summary  # noqa: E402
 import topology  # noqa: E402
@@ -101,7 +103,11 @@ def test_summary_helpers(tmp_path):
     g = tmp_path / "gs.txt"
     g.write_text("property   min   max\nHeterozygous (ab)   1.23%   1.31%\n"
                  "Genome Haploid Length   1,000,000 bp   1,234,567 bp\n")
-    assert summary.genomescope(g) == ("1.2", "1.31")
+    assert summary.genomescope(g) == ("1.2", "1.31", None)
+    # a genome skim: GenomeScope converges on the organelle peaks (e2e2 cwsc010: 0.28 Mb, 11.4 % read errors)
+    assert summary.genome_size_check("0.3", 11.4, "0.30").startswith("unreliable: read error 11.4%")
+    assert "coverage 3x < 15x" in summary.genome_size_check("1200", 0.4, "4.0")
+    assert summary.genome_size_check("1200", 0.4, "40") == ""
     assert summary.by_sample(["r/S1/S1.x", "r/S2/S2.x"]) == {"S1": Path("r/S1/S1.x"), "S2": Path("r/S2/S2.x")}
 
 
@@ -267,3 +273,73 @@ def test_smk_shim_runs_snakemake_script(tmp_path):
                     str(HERE.parent / "workflow" / "scripts" / "nuc_copies.py")], cwd=tmp_path, check=True)
     rows = (tmp_path / "out.tsv").read_text().splitlines()
     assert rows[1].split("\t") == ["18S", "1800", "", "1", "300.0", "10.00", "30"]
+
+
+def test_fasta_samples_dir_and_merged_split(tmp_path):
+    """-i: one sample per FASTA file; a merged FASTA split by the first header word, repeated names all kept"""
+    d = tmp_path / "in"
+    d.mkdir()
+    (d / "A.fasta").write_text(">c1\nACGT\n")
+    (d / "B.fa.gz").write_bytes(gzip.compress(b">c1\nGG\n"))
+    assert sorted(samples.fasta_samples([d])) == ["A", "B"]
+    merged = tmp_path / "all.fasta"
+    merged.write_text(">B2 topology=circular\nAAA\n>B17\nCC\n>B2 topology=linear\nTT\n")
+    got = samples.fasta_samples([merged], tmp_path / "split", split_by_id=True)
+    assert sorted(got) == ["B17", "B2"]
+    assert Path(got["B2"]).read_text() == ">B2_contig1\nAAA\n>B2_contig2\nTT\n"
+    assert Path(got["B17"]).read_text() == ">B17\nCC\n"
+    man = (tmp_path / "split" / "split_manifest.tsv").read_text().splitlines()
+    assert "B2\tB2_contig2\tB2 topology=linear" in man
+
+
+def test_read_sheet_without_reads(tmp_path):
+    """a sheet row with only an assembly (FASTA tools) has empty reads"""
+    sheet = tmp_path / "s.tsv"
+    sheet.write_text("sample\tfastq_1\tfastq_2\tscaffolds\nA\t\t\tA.fasta\n")
+    assert samples.read_sheet(sheet) == {"A": ("", "")}
+    assert samples.sheet_columns(sheet, ["scaffolds"])["A"]["scaffolds"] == str(tmp_path / "A.fasta")
+
+
+def test_mitofinder_summary_gene_table(tmp_path):
+    """gene lengths per sample (longest copy) and one FASTA per gene across samples"""
+    for s, cox1 in (("A", "ATGAAA"), ("B", "ATG")):
+        res = tmp_path / s / "Final_Results"
+        res.mkdir(parents=True)
+        (tmp_path / s / f"{s}.mitofinder.fasta").write_text(">c\n" + "A" * 100 + "\n")
+        extra = f">{s}@ND6\nAAATTT\n>{s}@ND6\nAAA\n" if s == "B" else f">{s}@ND5\nCC\n"
+        (res / f"{s}_final_genes_NT.fasta").write_text(f">{s}@COX1\n{cox1}\n>{s}@rrnL\nGGGG\n" + extra)
+        (res / f"{s}.infos").write_text("Circularization: Yes\n" if s == "A" else "Circularization: Not found\n")
+    out = tmp_path / "sum.tsv"
+    sys.argv = ["x", "-o", str(out), str(tmp_path / "A"), str(tmp_path / "B")]
+    mitofinder_summary.main()
+    rows = [r.split("\t") for r in out.read_text().splitlines()]
+    assert rows[0] == ["sample", "contigs", "length", "circular", "protein_genes", "rRNAs", "tRNAs", "COX1", "ND5",
+                       "ND6", "rrnL"]
+    assert rows[1] == ["A", "1", "100", "yes", "2", "1", "0", "6", "2", "N", "4"]
+    assert rows[2] == ["B", "1", "100", "no", "2", "1", "0", "3", "N", "6", "4"]
+    assert (tmp_path / "genes" / "COX1.fasta").read_text() == ">A\nATGAAA\n>B\nATG\n"
+    assert (tmp_path / "genes" / "ND6.fasta").read_text() == ">B\nAAATTT\n>B_copy2\nAAA\n"   # unique names
+    assert (tmp_path / "contigs" / "A_all_mt.fasta").exists()
+
+
+def test_mitofinder_check_contamination_vs_no_close_reference():
+    """another family is contamination only when close; distant off-family hits = no close relative in nt
+    (MJ20260820041 CHY006: COX1 82 % Opheliidae, COX2 77 % Drosophila over 69 %, ATP6 83 % over 15 %)"""
+    lin = {"Oph": "Metazoa; Annelida; Opheliidae; Travisia", "Dro": "Metazoa; Arthropoda; Drosophilidae; Drosophila",
+           "Nep": "Metazoa; Annelida; Nephtyidae; Nephtys"}
+
+    def hit(q, fam, pid, cov):
+        return {"qseqid": q, "sacc": f"X{fam}", "organism": fam, "taxonomy": lin[fam], "pident": str(pid),
+                "qcovs": str(cov)}
+    rows = [hit("A|COX1", "Oph", 82.0, 99), hit("A|CYTB", "Oph", 78.1, 92), hit("A|COX2", "Dro", 77.5, 69),
+            hit("A|ATP6", "Dro", 83.5, 15),
+            hit("M|COX1", "Nep", 93.6, 100), hit("M|CYTB", "Oph", 78.1, 92), hit("M|ND5", "Oph", 78.5, 90)]
+    qids = ["A|COX1", "A|CYTB", "A|COX2", "A|ATP6", "A|ND6", "M|COX1", "M|CYTB", "M|ND5"]
+    genes, samples = mitofinder_check.check(rows, qids, 85)
+    s = {x["sample"]: x for x in samples}
+    assert s["A"]["family"] == "Opheliidae" and s["A"]["verdict"].startswith("consistent family, no close reference")
+    assert s["M"]["verdict"] == "possible contamination: COX1"
+    v = {g["query"]: g["verdict"] for g in genes}
+    assert v["A|COX2"].startswith("no close reference (best Drosophilidae")
+    assert v["A|ATP6"].startswith("partial hit") and v["A|ND6"] == "no hit"
+    assert mitofinder_check.family("Metazoa; Annelida; Nephtyidae; Nephtys") == "Nephtyidae"

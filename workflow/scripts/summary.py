@@ -58,8 +58,26 @@ def genomescope(path):
     t = Path(path).read_text()
     size = re.search(r"Genome Haploid Length\s+([\d,]+) bp\s+([\d,]+) bp", t)
     het = re.search(r"Heterozygous \(ab\)\s+([\d.]+)%\s+([\d.]+)%", t)
+    err = re.search(r"Read Error Rate\s+([\d.]+)%", t)
     size_mb = f"{int(size.group(2).replace(',', '')) / 1e6:.1f}" if size else ""
-    return size_mb, (f"{het.group(2)}" if het else "")
+    return size_mb, (f"{het.group(2)}" if het else ""), float(err.group(1)) if err else None
+
+
+def genome_size_check(size_mb, err_pct, clean_gb, min_cov=15):
+    """why a GenomeScope fit cannot be trusted ("" = plausible). GenomeScope needs >= 15x haploid coverage
+    (README); on genome skims it still 'converges' on the mitochondrial / rDNA peaks - test data 0.3 Gb: 0.28 Mb
+    genome, 11 % read errors."""
+    if not size_mb:
+        return "no fit"
+    why = []
+    if err_pct is not None and err_pct > 5:
+        why.append(f"read error {err_pct:.1f}% > 5%")
+    if float(size_mb) < 10:
+        why.append(f"{size_mb} Mb < 10 Mb")
+    cov = float(clean_gb or 0) * 1000 / float(size_mb) if float(size_mb) else 0
+    if cov < min_cov:
+        why.append(f"coverage {cov:.0f}x < {min_cov}x")
+    return "unreliable: " + "; ".join(why) if why else ""
 
 
 def gene_count(path):
@@ -73,7 +91,7 @@ def main(sm):
     cols = ["sample", "clean_gb", "q30", "mt_length", "mt_circular", "mt_source", "mt_genes", "mt_topology",
             "mt_end_diagnosis",
             "nr_length", "nr_topology", "spades_n50", "spades_total_mb", "busco", "genome_size_mb",
-            "heterozygosity_pct", "rdna_copies", "histones", "blast_mt", "blast_nr"]
+            "heterozygosity_pct", "genome_size_note", "rdna_copies", "histones", "blast_mt", "blast_nr"]
     rows = {s: {c: "" for c in cols} | {"sample": s} for s in samples}
 
     for s, f in by_sample(inp.fastp).items():
@@ -95,7 +113,9 @@ def main(sm):
     for s, f in by_sample(inp.get("busco")).items():
         rows[s]["busco"] = busco_line(f)
     for s, f in by_sample(inp.get("genomescope")).items():
-        rows[s]["genome_size_mb"], rows[s]["heterozygosity_pct"] = genomescope(f)
+        size_mb, het, err = genomescope(f)
+        rows[s].update(genome_size_mb=size_mb, heterozygosity_pct=het,
+                       genome_size_note=genome_size_check(size_mb, err, rows[s]["clean_gb"]))
     for s, f in by_sample(inp.get("annotation")).items():
         g = gene_count(f)
         rows[s]["mt_genes"] = f"{g['CDS']} PCG / {g['tRNA']} tRNA / {g['rRNA']} rRNA" if any(g.values()) else ""

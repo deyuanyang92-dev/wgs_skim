@@ -28,6 +28,11 @@
 | SPAdes：`<jemalloc>: ... out of memory` 或被杀 | 内存估计（`spades_gib_per_gb` × clean 数据）偏低 | 自动重试给 1.5 倍内存并从检查点继续；或提高 `spades_min_mem_gb` |
 | SPAdes 没有运行（`clean data ... < spades_min_clean_gb`） | 数据量低于阈值 | 降低 `spades_min_clean_gb`（0 = 全部组装） |
 | Trinity 很慢（第二阶段 `succeeded(n) x% completed` 增长缓慢） | 第二阶段对每个 read 簇运行一次 Trinity（小数据也有上万个），大量小文件，磁盘 / CPU 被其他任务占用时很慢 | 机器空闲时运行；给 Trinity 更多线程 `-- --set-threads trinity=32` |
+| `MitoFinder needs a reference mitogenome GenBank` | MitoFinder 必须有参考 | `--ref related.gb`（`wgs_skim mitofinder`）或 `--mitofinder-ref`（`run`）；与 `meangs-getorganelle` 一起运行时自动用样品自己的 MitoM 注释 |
+| `MitoFinder found no mitochondrial contig`（结果为空文件） | 组装中没有与参考相似的 contig：参考太远、或线粒体覆盖度太低没有组装出来 | 换更近的参考；看 `logs/mitofinder/<s>.log`；用 GetOrganelle 组装 |
+| MitoFinder：`singularity: command not found` / 镜像不存在 | 配置了 `mitofinder_sif` 但本机没有 Singularity 或文件 | 修正路径，或 `--config mitofinder_sif=` 改用 bioconda MitoFinder 1.4.1 |
+| `no FASTA files ... in` | `-i` 目录中没有 .fasta / .fa / .fna / .fas | 检查扩展名；或直接列出文件 |
+| `sample 'X' found twice`（`-i`） | 两个文件的名称（去掉扩展名后）相同 | 改名，或分两次运行 |
 | BUSCO：`lineage ... not found` / 下载失败 | 无网络或名称错误 | `--busco-lineage /path/to/metazoa_odb12`（已下载的谱系目录） |
 | BLAST 要几个小时 | 每次搜索都读一遍完整 nt | 一次性 `wgs_skim build-blastdb`（后生动物 ≤ 50 kb：68 GB，每次 1–2 分钟），然后 `--blast-db` |
 | `blast_topn.tsv` 中 `(efetch failed)` | NCBI Entrez 未返回这些命中的元数据 | 比对结果仍在；以后 `-- --forcerun blast` 重做 |

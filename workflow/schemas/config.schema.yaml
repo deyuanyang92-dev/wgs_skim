@@ -20,6 +20,20 @@ properties:
   mitos_refdir: {type: string, default: "", description: "existing MITOS2 reference directory containing refseq89m"}
   busco_lineage: {type: string, default: ""}
   steps: {type: string, default: "", description: "run only these steps (comma separated); empty = all switched on"}
+  qc: {type: boolean, default: true, description: "false: the reads are used as they are (fastp only counts them)"}
+  busco_mode: {type: string, enum: [genome, transcriptome, proteins], default: genome}
+  mitofinder_ref: {type: string, default: ""}
+  mitofinder_sif: {type: string, default: ""}
+  mitofinder_assembly: {type: string, default: ""}
+  mitofinder_min_contig: {type: integer, default: 1000}
+  mitofinder_min_contig_rna: {type: integer, default: 300}
+  mitofinder_cov_factor: {type: [integer, number], default: 5}
+  mitofinder_max_pairs: {type: integer, default: 10000000}
+  mitofinder_blast: {type: boolean, default: true}
+  mitofinder_blast_genes: {type: string, default: all}
+  mitofinder_min_pident: {type: [integer, number], default: 85}
+  mitofinder_trna: {type: string, enum: [mitfi, trnascan, arwen], default: mitfi}
+  mitofinder_mem_gb: {type: [integer, number], default: 32}
   meangs: {type: boolean, default: true}
   mito: {type: boolean, default: true}
   nr: {type: boolean, default: true}
@@ -28,6 +42,7 @@ properties:
   genome_size: {type: boolean, default: true}
   annotate: {type: boolean, default: true}
   topology: {enum: [auto, "yes", "no", true, false], default: auto}
+  mitofinder: {type: boolean, default: false}
   blast: {type: boolean, default: true}
   getorganelle_kmers: {type: string, default: "21,45,65,85,105"}
   getorganelle_rounds: {type: integer, minimum: 1, default: 10}
@@ -40,7 +55,7 @@ properties:
   nr_seed: {type: string, default: ""}
   spades_modes: {type: string, default: "genome"}
   spades_kmers: {type: [string, integer], default: ""}
-  rnaspades_kmers: {type: [string, integer], default: "21,33,55"}
+  rnaspades_kmers: {type: [string, integer], default: "auto"}
   spades_careful: {type: boolean, default: false}
   spades_only_assembler: {type: boolean, default: false}
   spades_mode_gib_per_gb: {type: number, minimum: 0, default: 5}

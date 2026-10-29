@@ -6,7 +6,7 @@
 2. 命令行选项：`--taxon`、`--steps`、`--spades-modes`、`--blast-db`、`--mem-gb` ……（`wgs_skim run -h`）；
 3. `--config 键=值 键=值`：任何一个键，例如 `--config mt_iter_max_data_gb=0 nuclear_max_gb=5,10`。
 
-线程数和内存不在这里设置：`-j`（总核数）、`--mem-gb`（总内存），每个任务的用量见 [资源与续跑](Resources-and-resume.md)。
+线程数和内存不在这里设置：`-j`（总核数）、`--mem-gb`（总内存），每个任务的用量见 [资源与续跑](Resources-and-resume)。
 
 ## Input / output
 
@@ -35,7 +35,8 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `steps` | `""` | 只运行部分步骤（逗号分隔），所需的上游步骤自动加入；可用值见 [步骤](Steps.md)；空 = 下面打开的全部 |
+| `steps` | `""` | 只运行部分步骤（逗号分隔），所需的上游步骤自动加入；单个步骤 fastp meangs mito getorganelle nr spades rnaspades busco trinity rna genome_size annotate topology mitofinder blast nuclear summary，或组合 meangs-getorganelle spades-mitofinder spades-busco fastp-spades-busco rnaspades-busco trinity-busco（见 [组合流程](Combinations.md)）；空 = 下面打开的全部 |
+| `qc` | `true` | fastp cleaning first; false = the reads are already clean (fastp only counts them, the reads are linked as they are) - what the single-tool commands (wgs_skim spades ...) use |
 | `meangs` | `true` | MEANGS seed for GetOrganelle (false: GetOrganelle's own animal_mt seeds) |
 | `mito` | `true` | MEANGS seed -> GetOrganelle mitogenome (+ reseeded iterations if not circular) |
 | `nr` | `true` | GetOrganelle nuclear rDNA (18S-ITS-28S) |
@@ -44,6 +45,7 @@
 | `genome_size` | `true` | jellyfish + GenomeScope2 |
 | `annotate` | `true` | MitoM annotation of the final mitogenome |
 | `topology` | `auto` | read-based check of circular / linear (junction-spanning reads): auto = only linear mitogenomes; yes = every sequence, also the rDNA (tandem repeat unit); no = never |
+| `mitofinder` | `false` | MitoFinder on the SPAdes assembly as well (combination spades-mitofinder; needs assembly) |
 | `blast` | `true` | BLAST mitogenome and rDNA, top hits with GenBank taxonomy (species check) |
 
 ## Mitogenome
@@ -83,12 +85,35 @@
 |---|---|---|
 | `spades_modes` | `"genome"` | comma separated: genome (whole-genome skim: BUSCO, nuclear markers, mt fallback) and any SPAdes mode: isolate sc meta rna rnaviral plasmid metaplasmid metaviral bio sewage corona -> assembly/<s>/<s>.<mode>.fasta + .<mode>.busco.txt |
 | `spades_kmers` | `""` | -k for the non-genome modes ("" = SPAdes chooses) |
-| `rnaspades_kmers` | `"21,33,55"` | -k of rna / rnaviral (the user's rnaspades snakefile); "auto" = SPAdes chooses |
+| `rnaspades_kmers` | `"auto"` | -k of rna / rnaviral: auto = SPAdes chooses 2 values from the read length, as the manual advises (small k: chimeric transcripts); "21,33,55" = the earlier snakefile |
 | `spades_careful` | `false` | --careful (isolate, sc and plasmid modes only) |
 | `spades_only_assembler` | `false` | --only-assembler for the non-genome modes (the genome mode always uses it) |
 | `spades_mode_gib_per_gb` | `5` | memory estimate of the non-genome modes: GiB per Gb of clean data (>= 16 GB) |
 | `trinity_gib_per_gb` | `6` | Trinity --max_memory from the clean data (>= 16 GB) |
 | `trinity_extra` | `""` | more Trinity options, e.g. "--min_contig_length 300" |
+
+## MitoFinder (mitogenome from an assembly; the user's mitofinder-batch)
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `mitofinder_ref` | `""` | reference mitogenome(s) GenBank (-r); empty = the sample's own MitoM annotation (when the mitogenome step runs too), otherwise required |
+| `mitofinder_assembly` | `""` | what MitoFinder searches (comma separated, results per source mitofinder/<source>/): spades (the SPAdes assembly), rna (rnaSPAdes transcripts), trinity (Trinity transcripts), given (sheet column scaffolds / wgs_skim mitofinder -i), megahit / metaspades (MitoFinder assembles the reads itself); empty = given if present, else what the run assembles |
+| `mitofinder_min_contig` | `1000` | --min-contig-size for genome assemblies (MitoFinder's default) |
+| `mitofinder_min_contig_rna` | `300` | ... for transcripts (rna, trinity): single-gene mt transcripts are short |
+| `mitofinder_cov_factor` | `5` | genome assemblies: only scaffolds >= this x the weighted median coverage (0 = all) |
+| `mitofinder_max_pairs` | `10000000` | MEGAHIT / metaSPAdes mode: the first N read pairs (0 = all) |
+| `mitofinder_blast` | `true` | contamination check: BLAST every gene of every sample (blast_db / online), flag genes whose best hit is another family than the sample's other genes |
+| `mitofinder_blast_genes` | `all` | genes to check: all, or e.g. COX1,CYTB,rrnL |
+| `mitofinder_min_pident` | `85` | best hit below this identity: flagged "distant" (no close reference in nt) |
+| `mitofinder_trna` | `mitfi` | tRNA annotation: mitfi / trnascan / arwen |
+| `mitofinder_mem_gb` | `32` | memory of MitoFinder's own assembly (megahit / metaspades) |
+| `mitofinder_sif` | `""` | MitoFinder Singularity image (e.g. mitofinder_v1.4.2.sif); empty = bioconda MitoFinder 1.4.1 |
+
+## BUSCO
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `busco_mode` | `genome` | -m of the BUSCO step: genome / transcriptome / proteins (wgs_skim busco -m) |
 
 ## Genome size
 

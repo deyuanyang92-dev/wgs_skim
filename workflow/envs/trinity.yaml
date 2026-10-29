@@ -4,4 +4,5 @@ channels:
   - bioconda
   - nodefaults
 dependencies:
-  - trinity =2.15.2
+  - trinity =2.15.2=pl5321h077b44d_3   # builds _4.._6 ship a ParaFly that ignores -CPU: phase 2 runs serially
+                                       #   (trinityrnaseq#1473; 8 test jobs: 16 s vs 2 s) - docs/tools/Trinity.md

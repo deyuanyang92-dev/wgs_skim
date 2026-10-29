@@ -1,17 +1,32 @@
-"""FASTA I/O and end-overlap detection shared by the workflow scripts."""
+"""FASTA I/O and end-overlap detection shared by the workflow scripts (import them from here, not again).
+
+Every script in this directory imports with no side effects (its work is in main() / main(sm)), so any function
+can be reused: `sys.path.insert(0, <workflow/scripts>)` - a Snakemake `script:` adds snakemake.scriptdir."""
+import gzip
 from collections import defaultdict
 
 
-def read_fasta(path):
-    """[(header, SEQUENCE)]; the header is the whole line after '>'."""
-    recs = []
-    for line in open(path):
-        line = line.strip()
-        if line.startswith(">"):
-            recs.append([line[1:], []])
-        elif recs and line:
-            recs[-1][1].append(line.upper())
-    return [(n, "".join(q)) for n, q in recs]
+def iter_fasta(path, first_word=False, upper=True):
+    """(header, sequence) one record at a time (large assemblies), plain or .gz; header = the whole line after '>'
+    (first_word: up to the first space)"""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    name, seq = None, []
+    with opener(path, "rt") as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith(">"):
+                if name is not None:
+                    yield name, "".join(seq)
+                name, seq = (line[1:].split()[0] if first_word and line[1:].strip() else line[1:]), []
+            elif name is not None and line:
+                seq.append(line.upper() if upper else line)
+    if name is not None:
+        yield name, "".join(seq)
+
+
+def read_fasta(path, first_word=False, upper=True):
+    """[(header, SEQUENCE)] (see iter_fasta)"""
+    return list(iter_fasta(path, first_word, upper))
 
 
 def write_fasta(recs, fh):

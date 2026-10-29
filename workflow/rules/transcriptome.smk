@@ -72,15 +72,19 @@ rule spades_mode:
     shell:
         """
         mem=$(( {resources.mem_mb} / 1024 ))
-        if [ -f {params.out}/params.txt ]; then
+        # as rule spades: continue an interrupted run only with the same reads and options, else start clean
+        sig="$(stat -L -c '%n %s %Y' {input.r1} {input.r2} | tr '\n' ' ') {params.flag} {params.k} {params.extra}"
+        if [ -f {params.out}/params.txt ] && [ "$(cat {params.out}/wgs_skim.sig 2>/dev/null)" = "$sig" ]; then
             spades.py -o {params.out} --restart-from last -t {threads} -m $mem > {log} 2>&1
         else
+            rm -rf {params.out}; mkdir -p {params.out}; echo "$sig" > {params.out}/wgs_skim.sig
             spades.py {params.flag} -1 {input.r1} -2 {input.r2} -o {params.out} -t {threads} -m $mem \
                 {params.k} {params.extra} > {log} 2>&1
         fi
         if [ -s {params.out}/{params.result} ]; then cp {params.out}/{params.result} {output.fasta}
         else echo "[wgs_skim] SPAdes {wildcards.mode}: no {params.result} (nothing found)" >> {log}; : > {output.fasta}; fi
         rm -rf {params.out}/K* {params.out}/tmp {params.out}/misc {params.out}/corrected   # intermediates
+        rm -f {params.out}/wgs_skim.sig        # finished: a forced rerun starts clean
         """
 
 

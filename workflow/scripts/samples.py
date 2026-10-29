@@ -6,6 +6,7 @@ The sample name is the part before the token. Files directly in the directory an
 (one folder per sample) are both scanned.
 """
 import csv
+import sys
 import re
 from pathlib import Path
 
@@ -49,17 +50,22 @@ def find_pairs(reads_dir):
 
 def read_sheet(path):
     """samples.tsv / .csv with columns sample, fastq_1, fastq_2 (nf-core style); relative paths are relative to the
-    sheet. Further optional columns: see sheet_columns (scaffolds)."""
+    sheet. Further optional columns: see sheet_columns (scaffolds, mitogenome). The reads may be left empty when a
+    sample only has files for the FASTA tools (busco, mitom, mitofinder, blast): ("", "")."""
     p = Path(path).expanduser().resolve()
     delim = "," if p.suffix == ".csv" else "\t"
     pairs = {}
     with open(p, newline="", encoding="utf-8-sig") as fh:
         for row in csv.DictReader(fh, delimiter=delim):
             s = row["sample"].strip()
-            r1, r2 = (Path(row[k].strip()).expanduser() for k in ("fastq_1", "fastq_2"))
-            r1, r2 = (x if x.is_absolute() else p.parent / x for x in (r1, r2))
             if s in pairs:
                 raise ValueError(f"sample {s!r} listed twice in {p}")
+            cells = [(row.get(k) or "").strip() for k in ("fastq_1", "fastq_2")]
+            if not all(cells):
+                pairs[s] = ("", "")
+                continue
+            r1, r2 = (Path(c).expanduser() for c in cells)
+            r1, r2 = (x if x.is_absolute() else p.parent / x for x in (r1, r2))
             pairs[s] = (str(r1.resolve()), str(r2.resolve()))
     return pairs
 
@@ -78,6 +84,62 @@ def sheet_columns(path, columns):
                     f = Path(v).expanduser()
                     f = f if f.is_absolute() else p.parent / f
                     out.setdefault(row["sample"].strip(), {})[c] = str(f.resolve())
+    return out
+
+
+FA_EXT = re.compile(r"\.(?:fasta|fa|fna|fas|scafSeq)(?:\.gz)?$")
+
+
+def fasta_samples(inputs, split_dir=None, split_by_id=False):
+    """{sample: FASTA} for the FASTA tools. inputs: FASTA files and / or directories of them (sample = file name
+    without the extension; a directory with one sub-directory per sample is scanned one level down). One FASTA
+    holding several samples (a merged file, as `>B2 ...`, `>B17 ...`) is split by the first word of the headers
+    when split_by_id is set: one file per sample in split_dir, every record kept (repeated headers become
+    <sample>_contig<N>), with split_manifest.tsv tracing each record to its original header."""
+    files = []
+    for x in inputs:
+        x = Path(x).expanduser().resolve()
+        if x.is_dir():
+            files += [f for f in sorted(x.iterdir()) + sorted(x.glob("*/*")) if f.is_file() and FA_EXT.search(f.name)]
+        elif x.is_file():
+            files.append(x)
+        else:
+            raise ValueError(f"input not found: {x}")
+    if not files:
+        raise ValueError(f"no FASTA files (.fasta .fa .fna .fas) in {', '.join(map(str, inputs))}")
+    if split_by_id:
+        return split_fasta(files, Path(split_dir))
+    out = {}
+    for f in files:
+        s = FA_EXT.sub("", f.name)
+        if s in out:
+            raise ValueError(f"sample {s!r} found twice: {out[s]} and {f} (rename one, or use a sample sheet)")
+        out[s] = str(f)
+    return dict(sorted(out.items()))
+
+
+def split_fasta(files, split_dir):
+    """one FASTA per sample from the first word of each header (see fasta_samples)"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from seqtools import iter_fasta
+    recs = {}
+    for f in files:
+        for header, seq in iter_fasta(f, upper=False):
+            if header.split():
+                recs.setdefault(header.split()[0], []).append((header, seq))
+    recs.pop("", None)
+    split_dir.mkdir(parents=True, exist_ok=True)
+    out = {}
+    with open(split_dir / "split_manifest.tsv", "w") as man:
+        man.write("sample\tnew_id\toriginal_header\n")
+        for s, rs in sorted(recs.items()):
+            f = split_dir / f"{s}.fasta"
+            with open(f, "w") as fh:
+                for i, (header, seq) in enumerate(rs, 1):
+                    new = s if len(rs) == 1 else f"{s}_contig{i}"
+                    fh.write(f">{new}\n{seq}\n")
+                    man.write(f"{s}\t{new}\t{header}\n")
+            out[s] = str(f)
     return out
 
 

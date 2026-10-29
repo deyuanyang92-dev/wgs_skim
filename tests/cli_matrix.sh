@@ -66,6 +66,54 @@ check "unknown step"            "unknown step"             wgs_skim run -r "$rea
 check "unknown SPAdes mode"     "unknown SPAdes mode"      wgs_skim run -r "$reads" -o "$tmp/dry" -n --steps spades --spades-modes foo
 check "--mem-gb reaches snakemake" "--resources mem_mb=51200" wgs_skim run -r "$reads" -o "$tmp/dry" -n --steps fastp --mem-gb 50
 
+echo "[matrix] single tools and combinations (dry runs)"
+asm=$tmp/asm; mkdir -p $asm $tmp/mt
+for x in $(ls "$res/qc"); do
+    ln -sf "$(realpath "$res/assembly/$x/$x.scaffolds.fasta")" "$asm/$x.fasta"
+    ln -sf "$(realpath "$res/mito/$x/$x.mt.fasta")" "$tmp/mt/$x.fasta"
+done
+s0=$(ls "$res/qc" | head -1)
+ref=$(realpath "$res/annotation/$s0/$s0.mt.gb")
+tool() {       # tool NAME EXPECTED_RULES... -- wgs_skim ARGS : the rules a tool command would run
+    local name=$1; shift
+    local rules=()
+    while [ "$1" != "--" ]; do rules+=("$1"); shift; done; shift
+    local t0=$(date +%s) out ok=ok
+    out=$(wgs_skim "$@" -n 2>&1)
+    for r in "${rules[@]}"; do echo "$out" | grep -q "^rule $r:" || ok=FAIL; done
+    echo "$out" | grep -q "^total" || ok=FAIL
+    [ $ok = FAIL ] && fail=$((fail + 1))
+    printf "%s\twgs_skim %s -n\t%s\t%s\t%s\n" "$name" "$*" "rules: ${rules[*]}" "$ok" "$(( $(date +%s) - t0 ))" >> "$tsv"
+    printf "  %-4s %s\n" "$ok" "$name"
+}
+tool "tool fastp"                fastp -- fastp -r "$reads" -o $tmp/t1
+tool "tool meangs"               meangs -- meangs -r "$reads" -o $tmp/t2
+tool "tool getorganelle"         getorganelle_mt mt_iterate mt_select -- getorganelle -r "$reads" -o $tmp/t3
+tool "tool getorganelle --meangs" meangs getorganelle_mt -- getorganelle -r "$reads" -o $tmp/t3b --meangs
+tool "tool getorganelle --target nr" getorganelle_nr getorganelle_histone -- getorganelle -r "$reads" -o $tmp/t4 --target nr
+tool "tool spades --mode genome,rna" spades spades_mode -- spades -r "$reads" -o $tmp/t5 --mode genome,rna
+tool "tool trinity"              trinity -- trinity -r "$reads" -o $tmp/t6
+tool "tool genome-size"          jellyfish genomescope -- genome-size -r "$reads" -o $tmp/t7
+tool "tool busco -i"             assembly_given busco -- busco -i $asm -o $tmp/t8
+tool "tool busco -m transcriptome" assembly_given busco -- busco -i $asm -o $tmp/t8b -m transcriptome
+tool "tool mitom -i"             mt_given mitom_annotate -- mitom -i $tmp/mt -o $tmp/t9
+tool "tool blast -i"             mt_given blast -- blast -i $tmp/mt -o $tmp/t10
+tool "tool mitofinder -i"        assembly_given mitofinder mitofinder_summary -- mitofinder -i $asm -o $tmp/t11 --ref "$ref"
+tool "tool mitofinder -r"        mitofinder -- mitofinder -r "$reads" -o $tmp/t12 --ref "$ref"
+check "tool mitofinder without --ref" "needs a reference" wgs_skim mitofinder -i $asm -o $tmp/t13
+check "tool busco without -i"   "give the FASTA"           wgs_skim busco -o $tmp/t14
+dry "combo meangs-getorganelle" meangs getorganelle_mt mt_iterate mt_select -- --steps meangs-getorganelle
+dry "combo spades-busco"        spades busco -- --steps spades-busco
+dry "combo spades-mitofinder (own ref)" spades mitofinder mitom_annotate -- --steps meangs-getorganelle,spades-mitofinder
+dry "combo rnaspades-busco"     spades_mode busco_assembly -- --steps rnaspades-busco
+dry "combo trinity-busco"       trinity busco_assembly -- --steps trinity-busco
+dry "combo rnaspades-mitofinder" spades_mode mitofinder_input mitofinder mitofinder_summary mitofinder_blast -- --steps rnaspades-mitofinder --mitofinder-ref "$ref"
+dry "combo trinity-mitofinder"  trinity mitofinder_input mitofinder -- --steps trinity-mitofinder --mitofinder-ref "$ref"
+tool "tool mitofinder --assembler rnaspades,trinity" spades_mode trinity mitofinder -- mitofinder -r "$reads" -o $tmp/t15 --ref "$ref" --assembler rnaspades,trinity
+tool "tool mitofinder --no-check" mitofinder_summary -- mitofinder -i $asm -o $tmp/t17 --ref "$ref" --no-check
+check "tool mitofinder bad --assembler" "unknown --assembler" wgs_skim mitofinder -r "$reads" -o $tmp/t16 --ref "$ref" --assembler foo
+check "combo spades-mitofinder without ref" "needs a reference" wgs_skim run -r "$reads" -o "$tmp/dry" -n --steps spades-mitofinder
+
 echo "[matrix] commands on the finished results ($res)"
 s=$(ls "$res/qc" | head -1)
 round=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['round'])" "$res/mito/$s/$s.getorganelle.json")

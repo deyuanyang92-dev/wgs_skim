@@ -5,6 +5,9 @@
     wgs_skim run -r rawdata -n                        # dry run: show what would run
     wgs_skim run -r rawdata --steps fastp,spades,busco   # only some steps (plus what they need)
     wgs_skim run -r rawdata --engine nextflow         # the same run with Nextflow (-resume, work/ in the results)
+    wgs_skim run -r rawdata --steps spades-busco      # a combination: meangs-getorganelle spades-mitofinder ...
+    wgs_skim spades -r clean_reads -o asm --mode rna  # one tool, every sample: fastp meangs getorganelle spades
+    wgs_skim busco -i assemblies/ -o busco            #   trinity genome-size busco mitofinder mitom blast
     wgs_skim install                                  # create all software environments once
     wgs_skim samples -r rawdata                       # show detected sample names
     wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
@@ -106,10 +109,16 @@ def cmd_run(args, passthrough):
     conf = {"reads_dir": reads, "samples": Path(args.samples).resolve() if args.samples else None,
             "outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "blast_db": args.blast_db, "email": args.email,
             "busco_lineage": args.busco_lineage, "steps": args.steps,
-            "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes}
+            "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes,
+            "mitofinder_ref": Path(args.mitofinder_ref).resolve() if args.mitofinder_ref else None}
     mem = args.mem_gb or int(machine_mem_gb() * 0.9)
     if args.engine == "nextflow":
         return run_nextflow(args, conf, out, mem, passthrough)
+    return launch(args, conf, out, mem, passthrough)
+
+
+def launch(args, conf, out, mem, passthrough):
+    """snakemake on workflow/Snakefile: results in `out`, scheduled by cores and memory (GB)"""
     cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
     if mem:                                           # every rule declares mem_mb: jobs are scheduled by memory too
         cmd += ["--resources", f"mem_mb={int(mem * 1024)}"]
@@ -129,8 +138,11 @@ def run_nextflow(args, conf, out, mem, passthrough):
     if not exe:
         sys.exit("[wgs_skim] nextflow not found: conda install -c bioconda nextflow (or use --engine snakemake)")
     other = [m for m in str(args.spades_modes or "genome").split(",") if m.strip() not in ("", "genome")]
-    if other or set(str(args.steps or "").split(",")) & {"rna", "rnaspades", "trinity", "transcriptome"}:
-        sys.exit("[wgs_skim] other SPAdes modes and Trinity run with the Snakemake engine only (drop --engine nextflow)")
+    snakemake_only = {"rna", "rnaspades", "trinity", "transcriptome", "mitofinder", "spades-mitofinder",
+                      "rnaspades-busco", "trinity-busco"}
+    if other or set(str(args.steps or "").split(",")) & snakemake_only:
+        sys.exit("[wgs_skim] other SPAdes modes, Trinity and MitoFinder run with the Snakemake engine only "
+                 "(drop --engine nextflow)")
     params = {}
     for f in [USER_CONFIG] + ([Path(args.configfile)] if args.configfile else []):
         if Path(f).is_file():
@@ -154,9 +166,94 @@ def run_nextflow(args, conf, out, mem, passthrough):
     if args.dry_run:
         cmd.append("-preview")
     cmd += passthrough
-    env = dict(os.environ, WGS_SKIM_CONDA_PREFIX=str(args.conda_prefix))
+    # Nextflow >= 26.04 parses with the strict v2 syntax by default, which nextflow/ does not use yet
+    env = dict(os.environ, WGS_SKIM_CONDA_PREFIX=str(args.conda_prefix), NXF_SYNTAX_PARSER="v1")
     print(f"[wgs_skim] results: {out}\n[wgs_skim] {shlex.join(cmd)}", flush=True)
     return subprocess.run(cmd, cwd=str(out), env=env).returncode   # .nextflow/ (the -resume cache) lives there
+
+
+
+# ── wgs_skim <tool>: one tool on its own, for every sample (the same rules as `run`: Snakemake schedules the
+# samples by cores and memory, one log per job, resumable). Reads tools take -r / -s and use the reads as they
+# are (--qc: fastp first); FASTA tools take -i (files, directories, or one merged FASTA with --split-by-id).
+TOOLS = {
+    "fastp": ("reads", "clean reads (adapters, quality) and their report -> qc/<s>/"),
+    "meangs": ("reads", "MEANGS mitochondrial seed -> mito/<s>/meangs/"),
+    "getorganelle": ("reads", "GetOrganelle: mitogenome (reseeded rounds until circular) or rDNA + histones"),
+    "spades": ("reads", "SPAdes in any mode (genome rna meta plasmid ...) -> assembly/<s>/"),
+    "trinity": ("reads", "Trinity transcriptome -> assembly/<s>/<s>.trinity.fasta"),
+    "genome-size": ("reads", "jellyfish k-mers + GenomeScope2: genome size, heterozygosity -> genome_size/<s>/"),
+    "busco": ("fasta", "BUSCO completeness of assemblies / transcriptomes / proteins -> assembly/<s>/<s>.busco.txt"),
+    "mitofinder": ("both", "MitoFinder: the mitogenome in assemblies (-i) or MitoFinder's own assembly of reads (-r)"),
+    "mitom": ("fasta", "MitoM annotation of mitogenomes (genes, rRNA, tRNA; NCBI checks) -> annotation/<s>/"),
+    "blast": ("fasta", "BLAST sequences against nt, top hits with GenBank taxonomy -> blast/blast_topn.tsv"),
+}
+
+
+def tool_inputs(args, out, column):
+    """sample sheet of the -i FASTA files (no reads): <out>/.wgs_skim/inputs.tsv"""
+    sys.path.insert(0, str(workflow_root() / "workflow" / "scripts"))
+    from samples import fasta_samples
+    meta = out / ".wgs_skim"
+    fastas = fasta_samples(args.input, meta / "split", args.split_by_id)
+    if args.only:
+        fastas = {k: v for k, v in fastas.items() if k in args.only.split(",")}
+    meta.mkdir(parents=True, exist_ok=True)
+    sheet = meta / "inputs.tsv"
+    with open(sheet, "w") as fh:
+        fh.write(f"sample\tfastq_1\tfastq_2\t{column}\n")
+        fh.writelines(f"{k}\t\t\t{v}\n" for k, v in fastas.items())
+    print(f"[wgs_skim] {len(fastas)} sample(s) from {', '.join(args.input)} -> {sheet}", flush=True)
+    return sheet
+
+
+def cmd_tool(args, passthrough):
+    t, kind = args.tool, TOOLS[args.tool][0]
+    use_fasta = kind == "fasta" or (kind == "both" and args.input)
+    if use_fasta and not args.input:
+        sys.exit(f"[wgs_skim] give the FASTA files: wgs_skim {t} -i FILE|DIR [...]")
+    if not use_fasta and not (args.reads_dir or args.samples):
+        sys.exit(f"[wgs_skim] give the reads: wgs_skim {t} -r READS_DIR (or -s sheet.tsv)"
+                 + (" or assemblies: -i FASTA" if kind == "both" else ""))
+    out = Path(args.outdir or f"{t}_results").resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    conf = {"outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "qc": True}
+    if use_fasta:
+        col = {"busco": "scaffolds", "mitofinder": "scaffolds"}.get(t, "mitogenome")
+        conf["samples"] = tool_inputs(args, out, col)
+    else:
+        conf["reads_dir"] = Path(args.reads_dir).resolve() if args.reads_dir else None
+        conf["samples"] = Path(args.samples).resolve() if args.samples else None
+        conf["qc"] = t == "fastp" or args.qc
+    steps = {"fastp": "fastp", "meangs": "meangs", "spades": "spades", "trinity": "trinity",
+             "genome-size": "genome_size", "busco": "busco", "mitofinder": "mitofinder", "mitom": "annotate",
+             "blast": "blast"}.get(t)
+    if t == "getorganelle":
+        steps = "nr" if args.target == "nr" else ("mito" if args.meangs else "getorganelle")
+        if args.rounds is not None:
+            conf["mt_iter_rounds"] = args.rounds
+    if t == "spades":
+        conf["spades_modes"] = args.mode
+    if t == "busco":
+        conf.update(busco_mode=args.mode, busco_lineage=args.lineage)
+    if t == "mitofinder":
+        if not args.ref:
+            sys.exit("[wgs_skim] MitoFinder needs a reference mitogenome GenBank: --ref related_species.gb")
+        asm = [x.strip() for x in args.assembler.split(",") if x.strip()]
+        bad = [x for x in asm if x not in ("megahit", "metaspades", "spades", "rnaspades", "trinity")]
+        if bad:
+            sys.exit(f"[wgs_skim] unknown --assembler {', '.join(bad)}: megahit metaspades spades rnaspades trinity")
+        src = {"rnaspades": "rna"}
+        conf.update(mitofinder_blast=not args.no_check, blast_db=args.db)
+        conf.update(mitofinder_ref=Path(args.ref).resolve(), mitofinder_trna=args.trna,
+                    mitofinder_assembly="given" if use_fasta else ",".join(src.get(x, x) for x in asm))
+        if not use_fasta:              # the assemblers that are workflow steps
+            steps = ",".join(["mitofinder"] + [x for x in asm if x in ("spades", "rnaspades", "trinity")])
+    if t == "blast":
+        conf.update(blast_mt=args.genes, blast_nr="none", blast_db=args.db, email=args.email, blast_topn=args.topn)
+    conf["steps"] = steps
+    mem = args.mem_gb or int(machine_mem_gb() * 0.9)
+    return launch(args, conf, out, mem, passthrough)
 
 
 def cmd_install(args, passthrough):
@@ -313,12 +410,16 @@ def main(argv=None):
                         "-resume in the results directory)")
     r.add_argument("--steps", metavar="STEP[,STEP]",
                    help="run only these steps (and what they need): fastp, meangs, mito (MEANGS + GetOrganelle), "
-                        "getorganelle (without MEANGS), nr (rDNA + histones), spades, busco, genome_size, annotate, "
-                        "topology, blast, nuclear (rDNA + histones in the SPAdes assembly, copy numbers, vs "
-                        "GetOrganelle), trinity, rna (rnaSPAdes + Trinity + BUSCO), summary (default: everything)")
+                        "getorganelle (without MEANGS), nr (rDNA + histones), spades, rnaspades, busco, genome_size, "
+                        "annotate (MitoM), topology, mitofinder, blast, nuclear (rDNA + histones in the SPAdes "
+                        "assembly, copy numbers, vs GetOrganelle), trinity, rna (rnaSPAdes + Trinity + BUSCO), "
+                        "summary; or combinations: meangs-getorganelle, spades-mitofinder, spades-busco, "
+                        "fastp-spades-busco, rnaspades-busco, trinity-busco (default: everything)")
     r.add_argument("--spades-modes", metavar="M[,M]",
                    help="SPAdes modes: genome (default) and/or isolate, sc, meta, rna, rnaviral, plasmid, "
                         "metaplasmid, metaviral, bio, sewage, corona (one assembly + BUSCO each)")
+    r.add_argument("--mitofinder-ref", help="MitoFinder reference GenBank (combination spades-mitofinder; default: "
+                   "the sample's own MitoM annotation when the mitogenome step runs too)")
     r.add_argument("--blast-db", help="local nt database prefix (default: NCBI online BLAST)")
     r.add_argument("--blast-mt", metavar="Q[,Q]",
                    help="mitogenome BLAST queries: full and/or genes, e.g. cox1,16s,cytb (default cox1)")
@@ -328,6 +429,63 @@ def main(argv=None):
     r.add_argument("--busco-lineage", help="BUSCO lineage name or downloaded lineage directory")
     common(r)
     r.set_defaults(func=cmd_run)
+
+    for t, (kind, helptext) in TOOLS.items():
+        tp = sub.add_parser(t, help=helptext, formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                            description=f"{helptext}. Every sample in one batch; resumable (run the same command "
+                                        "again). Options after -- go to snakemake.")
+        if kind in ("reads", "both"):
+            tp.add_argument("-r", "--reads_dir", help="directory of paired FASTQ files (sample names detected)")
+            tp.add_argument("-s", "--samples", help="sample sheet instead of -r: sample, fastq_1, fastq_2")
+            if t != "fastp":
+                tp.add_argument("--qc", action="store_true", help="clean the reads with fastp first "
+                                "(default: the reads are used as they are)")
+        if kind in ("fasta", "both"):
+            tp.add_argument("-i", "--input", nargs="+", default=[], metavar="FASTA|DIR",
+                            help="FASTA files or directories of them (sample = file name)")
+            tp.add_argument("--split-by-id", action="store_true", help="the input is one FASTA of many samples: "
+                            "split it by the first word of the headers (>B2 ..., >B17 ...)")
+            tp.add_argument("--only", help="only these samples (comma-separated)")
+        tp.add_argument("-o", "--outdir", help=f"results directory (default: ./{t}_results)")
+        tp.add_argument("-t", "--taxon", choices=TAXA, help="taxon preset: genetic code, MitoM clade, BUSCO "
+                        "lineage, MEANGS class (default annelid)")
+        tp.add_argument("-j", "--cores", type=int, default=os.cpu_count(), help="CPU cores for all jobs together")
+        tp.add_argument("--mem-gb", type=int, default=0, help="memory for all jobs together (default 90%% of the "
+                        "machine)")
+        tp.add_argument("-n", "--dry-run", action="store_true", help="only show what would run")
+        if t == "getorganelle":
+            tp.add_argument("--target", choices=["mt", "nr"], default="mt",
+                            help="mt = mitogenome; nr = nuclear rDNA (18S-ITS-28S) + histone cluster (5 Gb, then "
+                                 "10 Gb seeded with round 1)")
+            tp.add_argument("--meangs", action="store_true", help="MEANGS seed first (= meangs-getorganelle)")
+            tp.add_argument("--rounds", type=int, help="reseeded rounds when not circular (0 = none; default 3)")
+        if t == "spades":
+            tp.add_argument("--mode", default="genome", metavar="M[,M]",
+                            help="genome, isolate, sc, meta, rna, rnaviral, plasmid, metaplasmid, metaviral, bio, "
+                                 "sewage, corona (several: one assembly each)")
+        if t == "busco":
+            tp.add_argument("-m", "--mode", choices=["genome", "transcriptome", "proteins"], default="genome")
+            tp.add_argument("-l", "--lineage", help="lineage name or downloaded lineage directory "
+                            "(default from --taxon: metazoa_odb12 for annelids)")
+        if t == "mitofinder":
+            tp.add_argument("--ref", help="reference mitogenome(s) GenBank of related species (required)")
+            tp.add_argument("--assembler", default="megahit", metavar="A[,A]",
+                            help="with -r: what assembles the reads for MitoFinder: megahit / metaspades "
+                                 "(MitoFinder's own), spades (SPAdes genome), rnaspades / trinity (transcripts: "
+                                 "mt genes from RNA-seq); several = one MitoFinder run each")
+            tp.add_argument("--trna", choices=["mitfi", "trnascan", "arwen"], default="mitfi")
+            tp.add_argument("--no-check", action="store_true", help="skip the contamination check (BLAST of every "
+                            "gene of every sample against nt, genes hitting another family flagged)")
+            tp.add_argument("--db", help="BLAST database of the check (default: blast_db of ~/.wgs_skim/config.yaml, "
+                            "else NCBI online)")
+        if t == "blast":
+            tp.add_argument("--db", help="local BLAST database prefix (default: NCBI online BLAST)")
+            tp.add_argument("--genes", default="full", help="full = the whole sequence; or genes cut from a MitoM "
+                            "annotation of each input, e.g. cox1,16s")
+            tp.add_argument("--topn", type=int, default=5)
+            tp.add_argument("--email", help="e-mail for NCBI Entrez (organism and taxonomy of the hits)")
+        common(tp)
+        tp.set_defaults(func=cmd_tool, tool=t)
 
     i = sub.add_parser("install", help="create all software environments (once)")
     common(i)

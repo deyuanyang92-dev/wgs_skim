@@ -124,9 +124,30 @@ rule mt_select:
     benchmark:
         f"{OUT}benchmarks/mt_select/{{sample}}.tsv"
     threads: 8
+    wildcard_constraints:
+        sample=one_of([x for x in SAMPLES if x not in GIVEN_MT]),
     conda:
         "../envs/blast.yaml"
     script:
         "../scripts/mt_select.py"
+
+
+rule mt_given:
+    """a mitogenome made elsewhere (sheet column mitogenome, wgs_skim mitom / blast -i): copied, IDs kept"""
+    input:
+        lambda w: GIVEN[w.sample]["mitogenome"],
+    output:
+        fasta=f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta",
+        status=f"{OUT}mito/{{sample}}/{{sample}}.mt.json",
+    wildcard_constraints:
+        sample=one_of(GIVEN_MT),
+    localrule: True
+    run:
+        import shutil
+        shutil.copyfile(input[0], output.fasta)
+        seqs = [x for x in open(output.fasta).read().split(">")[1:]]
+        n = sum(len("".join(x.splitlines()[1:])) for x in seqs)
+        json.dump({"source": "given", "given": input[0], "length": n, "circular": False, "round": None,
+                   "note": "given"}, open(output.status, "w"), indent=1)
 
 

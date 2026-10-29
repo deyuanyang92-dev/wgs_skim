@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - mitofinder=1.4.1      # newest on bioconda (python 2.7); 1.4.2 is the Singularity image: config mitofinder_sif
