@@ -1,8 +1,8 @@
 # 步骤详解
 
 `--steps` 选择要跑的步骤（逗号分隔），它们依赖的上游步骤会自动一起运行，已完成的结果直接复用。不写 `--steps` = 全部。
-时间与内存为实测值：双样品测试数据（每个样品 1 M 对 reads = 0.3 Gb，见 [[测试|Testing]]），128 核机器；真实数据
-（10–50 Gb / 样品）的时间随数据量增加，内存按数据量自动估计（见 [[资源调度与续跑|Resources-and-resume]]）。
+时间与内存为实测值：双样品测试数据（每个样品 1 M 对 reads = 0.3 Gb，见 [测试](Testing.md)），128 核机器；真实数据
+（10–50 Gb / 样品）的时间随数据量增加，内存按数据量自动估计（见 [资源调度与续跑](Resources-and-resume.md)）。
 
 | 步骤 | 做什么 | 主要输出 | 测试数据：时间 / 内存峰值（每样品） |
 |---|---|---|---|
@@ -15,7 +15,7 @@
 | `nr` | GetOrganelle 组装 rDNA 与组蛋白基因簇，MitoM 注释 | `rdna/<s>/<s>.rdna.gbf`、`histone/<s>/<s>.histone.gbf` | rDNA 3–9 min / 0.9 GB；组蛋白 10–11 min / 2.4 GB |
 | `spades` | SPAdes 组装（默认 genome；`--spades-modes` 选其他模式） | `assembly/<s>/<s>.scaffolds.fasta`、`<s>.<模式>.fasta` | 6–8 min / 2.8 GB |
 | `busco` | BUSCO 评估每个组装 | `assembly/<s>/<s>.busco.txt`、`<s>.<模式>.busco.txt` | 40 s / 1.7 GB |
-| `trinity` | Trinity 转录组组装 | `assembly/<s>/<s>.trinity.fasta` | 见 [[SPAdes 各模式与转录组|Assembly-modes]] |
+| `trinity` | Trinity 转录组组装 | `assembly/<s>/<s>.trinity.fasta` | 见 [SPAdes 各模式与转录组](Assembly-modes.md) |
 | `rna` | 转录组：rnaSPAdes + Trinity + 两者的 BUSCO（transcriptome 模式） | `<s>.rna.fasta`、`<s>.trinity.fasta`、`*.busco.txt` | 同上 |
 | `genome_size` | jellyfish + GenomeScope2 | `genome_size/<s>/<s>.genomescope.txt` + 图 | 30 s – 2 min / 6.8 GB |
 | `nuclear` | SPAdes 组装中的 rDNA / 组蛋白、拷贝数、与 GetOrganelle 结果逐基因比较 | `nuclear/<s>/<s>.copy_number.tsv`、`.nuc_compare.tsv` | 15–50 s / 1.4 GB |

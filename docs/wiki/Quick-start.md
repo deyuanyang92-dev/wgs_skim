@@ -18,7 +18,7 @@ wgs_skim run -r /path/to/rawdata -o /path/to/results
 nohup wgs_skim run -r /path/to/rawdata -o /path/to/results > run.log 2>&1 &
 ```
 
-中断后**用同一条命令重跑**，已完成的步骤不会重做（见 [[资源调度与续跑|Resources-and-resume]]）。
+中断后**用同一条命令重跑**，已完成的步骤不会重做（见 [资源调度与续跑](Resources-and-resume.md)）。
 
 ## 常用变化
 
@@ -31,4 +31,4 @@ wgs_skim run -r rnaseq/ -o res/ --steps rna              # 转录组：rnaSPAdes
 wgs_skim run -r raw/ -o res/ -n                          # 只看会运行哪些任务（不运行）
 ```
 
-每个步骤的命令和输出见 [[步骤详解|Steps]]。
+每个步骤的命令和输出见 [步骤详解](Steps.md)。

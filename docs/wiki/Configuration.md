@@ -6,7 +6,7 @@
 2. 命令行选项：`--taxon`、`--steps`、`--spades-modes`、`--blast-db`、`--mem-gb` ……（`wgs_skim run -h`）；
 3. `--config 键=值 键=值`：任何一个键，例如 `--config mt_iter_max_data_gb=0 nuclear_max_gb=5,10`。
 
-线程数和内存不在这里设置：`-j`（总核数）、`--mem-gb`（总内存），每个任务的用量见 [资源与续跑](Resources-and-resume)。
+线程数和内存不在这里设置：`-j`（总核数）、`--mem-gb`（总内存），每个任务的用量见 [资源与续跑](Resources-and-resume.md)。
 
 ## Input / output
 
@@ -35,7 +35,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `steps` | `""` | 只运行部分步骤（逗号分隔），所需的上游步骤自动加入；可用值见 [步骤](Steps)；空 = 下面打开的全部 |
+| `steps` | `""` | 只运行部分步骤（逗号分隔），所需的上游步骤自动加入；可用值见 [步骤](Steps.md)；空 = 下面打开的全部 |
 | `meangs` | `true` | MEANGS seed for GetOrganelle (false: GetOrganelle's own animal_mt seeds) |
 | `mito` | `true` | MEANGS seed -> GetOrganelle mitogenome (+ reseeded iterations if not circular) |
 | `nr` | `true` | GetOrganelle nuclear rDNA (18S-ITS-28S) |

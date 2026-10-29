@@ -1,0 +1,17 @@
+# wgs_skim 中文使用手册（目录）
+
+- [首页：软件简介](Home.md)
+- [安装](Installation.md)
+- [快速开始](Quick-start.md)
+- [输入数据](Input.md)
+- [步骤详解](Steps.md)
+- [线粒体](Mitogenome.md)
+- [核多拷贝基因](Nuclear-markers.md)
+- [SPAdes 各模式与转录组](Assembly-modes.md)
+- [BLAST 物种鉴定](BLAST.md)
+- [资源调度与续跑](Resources-and-resume.md)
+- [配置参数](Configuration.md)
+- [输出文件](Output.md)
+- [报错排查](Troubleshooting.md)
+- [测试](Testing.md)
+- [旧脚本对照](From-old-scripts.md)

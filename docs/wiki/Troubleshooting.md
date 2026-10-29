@@ -17,7 +17,7 @@
 
 | 信息 / 现象 | 原因 | 处理 |
 |---|---|---|
-| `no paired FASTQ files ... found` | 文件名无法识别 | `wgs_skim samples -r DIR` 看识别结果；否则用样品表 `-s`（见 [输入](Input)） |
+| `no paired FASTQ files ... found` | 文件名无法识别 | `wgs_skim samples -r DIR` 看识别结果；否则用样品表 `-s`（见 [输入](Input.md)） |
 | `sample 'X' found twice` | 同一样品两个 lane / 两种命名 | 合并 lane，或用样品表 |
 | `Directory cannot be locked` / `IncompleteFilesException` | 上次运行被中断 | `wgs_skim run ... -- --unlock`，再运行同一条命令（不完整的文件会重做） |
 | `CreateCondaEnvironmentException`，`wgs_skim install` 中止 | 建环境时网络 / 频道问题 | 再运行 `wgs_skim install`（已建好的环境保留）；`--conda-prefix` 放到剩余 > 20 GB 的磁盘 |

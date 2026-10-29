@@ -15,6 +15,9 @@ raw reads ─ fastp ─┬─ MEANGS seed ─ GetOrganelle mitogenome ─ not ci
 
 ## 中文快速上手
 
+**详细中文使用手册（每个功能的命令、实测时间与内存、输出、报错排查）：[docs/wiki](docs/wiki/README.md)**
+
+
 ```bash
 # 1. 安装（一次）
 git clone https://github.com/deyuanyang92-dev/wgs_skim.git && cd wgs_skim
