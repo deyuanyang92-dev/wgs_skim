@@ -482,10 +482,11 @@ each job's shell command, and open an issue with `logs/<step>/<sample>.log` atta
 ## Testing
 
 ```bash
-python -m pytest -q tests/                              # unit tests of the scripts (seconds, no tools needed)
-wgs_skim run -r small_sample/ -o /tmp/wgs_skim_test     # end-to-end on a small sample (~30 min): see below
-wgs_skim run -r small_sample/ -o /tmp/wgs_skim_test -s sheet.tsv --steps nuclear   # with a given assembly
+python -m pytest -q tests/                  # unit tests of the scripts (seconds, no tools needed)
+tests/e2e.sh small_reads/ e2e_out/          # whole workflow on 2+ small samples, every output checked per sample
 ```
+
+What was tested, how, with which data, the results and the bugs found: [docs/TESTING.md](docs/TESTING.md).
 
 The end-to-end check used before every release is one 0.6 Gb polychaete sample (HNP1sub, 2 M read pairs): every
 step runs, `summary/samples.tsv` has one row, and the nuclear markers are compared (rDNA 5/5 genes identical
