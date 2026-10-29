@@ -97,6 +97,11 @@ rnaSPAdes vs Trinity：rnaSPAdes 论文（Bushmanova 2019）在小鼠等数据�
   这是好的；但若输入 reads 已变（fastp 重跑），旧检查点会被沿用，且有 #1477 的"空结果退出 0"风险——规则中 `mv` 会因文件不存在而失败，不会静默成功。
 - 小文件：Phase 2 在 `read_partitions/Fb_*/CBin_*/` 下每簇写若干文件，`--full_cleanup` 在成功结束时全部删除；失败时需手动清理（记录到 CLEANUP 日志）。
 
+- **2026-10-30 salmon 2.x**：固定 build _3 后重建的环境解析出 salmon 2.8.0（Rust 重写版）。Trinity 2.15.2 的
+  `salmon_runner.pl` 调用 `salmon quant --minAssignedFrags 1 --validateMappings`，2.x 已删除这些选项：
+  `error: unexpected argument '--minAssignedFrags' found`，Trinity 在表达量过滤一步退出（tools2 trinity-busco：A1、R1 都失败）。
+  处理：`trinity.yaml` 固定 `salmon =1.10.3`（最后的 C++ 版）。
+
 ## 7. 排错清单
 
 1. `logs/trinity/<s>.log`：阶段标记 `Trinity Phase 1`、`Inchworm`、`Chrysalis`、`Trinity Phase 2: Assembling Clusters of Reads`、

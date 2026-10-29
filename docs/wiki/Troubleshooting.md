@@ -22,6 +22,8 @@
 | `Directory cannot be locked` / `IncompleteFilesException` | 上次运行被中断 | `wgs_skim run ... -- --unlock`，再运行同一条命令（不完整的文件会重做） |
 | `CreateCondaEnvironmentException`，`wgs_skim install` 中止 | 建环境时网络 / 频道问题 | 再运行 `wgs_skim install`（已建好的环境保留）；`--conda-prefix` 放到剩余 > 20 GB 的磁盘 |
 | `unknown step 'x'` / `unknown SPAdes mode 'x'` | 拼写错误 | 信息中列出全部可用值 |
+| Trinity：`unexpected argument '--minAssignedFrags'` | 环境里是 salmon 2.x，Trinity 2.15.2 需要 1.x | 已固定 `salmon =1.10.3`；旧环境删掉后重建（`wgs_skim install`） |
+| MitoFinder：`MitoFinder is not installed ... Aborting` | bioconda 1.4.1 环境缺 `install.sh.ok` | 用默认的 1.4.2 镜像（`mitofinder_sif`）；wgs_skim 把它报为失败，不当作"没找到" |
 | GetOrganelle：`Too few seed reads found` | 种子与样品相距太远（其他科），或 reads 太少 | 组蛋白已用局部比对招募；自己给种子（`histone_seed`、`nr_seed`），或 `nuclear_max_gb: 10,20` |
 | GetOrganelle：`No space left on device` | 它把用到的 reads 解压到输出目录（最多数据量 1.5 倍） | 结果目录放到大磁盘；`nuclear_max_gb`、`mt_iter_max_data_gb` 限制了数据量 |
 | 线粒体没有成环（`mt_circular: no`） | 重复迭代仍未闭合：控制区重复、覆盖度低 | `topology/` 说明末端能否连接；`mt_iter_max_data_gb: 0` 用全部 reads；用 `wgs_skim compare` 对照 MitoFinder 结果 |
