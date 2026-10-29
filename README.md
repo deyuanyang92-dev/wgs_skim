@@ -230,6 +230,57 @@ rule's share with `-- --set-threads spades=48` or `-- --set-resources spades:mem
 
 Cluster: add a Snakemake executor profile, e.g. `--executor slurm --jobs 50` (snakemake-executor-plugin-slurm).
 
+### With Nextflow
+
+`nextflow/main.nf` (DSL2, Nextflow >= 24.04) runs the same steps with the same scripts (`workflow/scripts`), the same
+conda environments (`workflow/envs`) and the same output layout. The easiest way is the same command with
+`--engine nextflow`:
+
+```bash
+wgs_skim run --engine nextflow -r /path/to/rawdata -o results -j 32 --mem-gb 120
+```
+
+It passes every option of `wgs_skim run` as a Nextflow parameter (`-j` -> `--max_cpus`, `--mem-gb` -> `--max_memory`,
+`--config KEY=VALUE` -> `--KEY VALUE`; `~/.wgs_skim/config.yaml` and `--configfile` -> `-params-file`), always with
+`-resume`, the task directories in `results/work` and Nextflow's own files (`.nextflow/`, `.nextflow.log`) in
+`results/`. Directly:
+
+```bash
+nextflow run nextflow/main.nf -profile conda --reads_dir /path/to/rawdata --outdir results \
+    --max_cpus 32 --max_memory '120 GB' -resume
+nextflow run nextflow/main.nf -profile conda -params-file my.yaml -resume     # my.yaml: `wgs_skim config > my.yaml`
+nextflow run nextflow/main.nf -profile conda --samples sheet.tsv --steps fastp,spades,busco --taxon fish -resume
+```
+
+- **Parameters** are the keys of `config/config.yaml` (its values are the defaults, read by `nextflow.config`), plus
+  `--max_cpus`, `--max_memory`, `--publish_mode` (`link`: hard links from `work/`, the default; `copy` when `work/`
+  is on another disk), `--python` (runs `samples.py` at start-up) and `--conda_prefix`. `--steps` takes the same
+  names and aliases as with Snakemake and runs only what they need; `--steps summary` alone makes the report of an
+  existing results directory.
+- **Resume**: `-resume` reuses every finished task (same inputs and parameters) from `work/`; run the same command
+  again after an error or an interruption, from the same directory (`wgs_skim` runs Nextflow in the results
+  directory). Keep `work/` until the batch is done: results are hard links into it, so deleting `work/` afterwards
+  leaves them intact. Databases (GetOrganelle `animal_mt`, MitoM at `mitom_commit` / `mitom_nuc_commit`, MITOS2
+  refseq89m, BUSCO lineage) are made once under `db_dir` (`storeDir`) and shared by all runs, Snakemake or Nextflow.
+- **Software**: profile `conda` (`conda.enabled`). Environments that `wgs_skim install` (Snakemake) made in the
+  conda prefix (`WGS_SKIM_CONDA_PREFIX` / `--conda_prefix`) from an identical `workflow/envs/*.yaml` are used as
+  they are; otherwise Nextflow builds them in `conda.cacheDir` (= `WGS_SKIM_CONDA_PREFIX` when set).
+- **Resources**: every process has the Snakemake rule's `threads` as `cpus` and its `mem_mb` as `memory`;
+  SPAdes and GetOrganelle get theirs from the clean data in `fastp.json` (as in `common.smk`). The local executor
+  runs tasks side by side within `--max_cpus` / `--max_memory` (default: all cores, 90 % of the memory); larger
+  requests are capped (`resourceLimits`). A failed task is tried once more (SPAdes with 1.5x memory, GetOrganelle
+  with 2x), then running tasks finish and the run stops. Per-process threads, as `--set-threads`: a config file
+  `-c my.config` with `process { withName: SPADES { cpus = 48 } }`.
+- **Slurm**: `-profile conda,slurm` submits every task as a job (`--slurm_queue`, `--slurm_options '--account=x'`,
+  up to 50 jobs queued); `--max_cpus` / `--max_memory` then cap a single job.
+- **Run reports**: `results/pipeline_info/` (trace with the peak memory and time of every task, HTML report,
+  timeline), in place of Snakemake's `benchmarks/`.
+- **Scripts**: the scripts written for Snakemake's `script:` directive (`mt_iterate.py`, `mt_select.py`,
+  `topology.py`, `blast_taxonomy.py`, `summary.py`, `nuc_copies.py`) run unchanged through `nextflow/bin/smk_shim.py`,
+  which gives them the `snakemake` object (input / output / params / log / threads / wildcards) from a JSON file.
+- **Test**: `nextflow run nextflow/main.nf -stub-run --reads_dir DIR --outdir x --db_dir x/db` builds the whole DAG
+  in seconds without running a tool; `-profile test` sets the short test settings of `tests/e2e.sh`.
+
 ### Input
 
 Sample names come from the file names. These are recognised (sample name = part before the read token):
@@ -467,12 +518,16 @@ Snakemake keeps track of every output file: run the same command again after an 
 the missing or out-of-date jobs run. Useful Snakemake options (`wgs_skim run ... -- <option>`):
 `--forcerun mt_iterate` (redo a step), `--until busco` (stop after a step), `--unlock` (after a crash),
 `--rerun-triggers mtime` (ignore changed parameters).
+With `--engine nextflow`, `-resume` is always on: the same command reuses every finished task (see "With Nextflow").
 
 ## Troubleshooting
 
 Where to look: `logs/<step>/<sample>.log` is the tool's own output for that job; `benchmarks/<step>/<sample>.tsv`
 its runtime and peak memory; `.snakemake/log/` the Snakemake log of each run. A failed job keeps `keep-going`: the
 other samples continue, the summary waits. `wgs_skim run ... -n` shows what would run without running it.
+With Nextflow: the error message names the task's work directory (`.command.sh` = the command, `.command.err`,
+`logs/<step>/<sample>.log` inside it); `results/.nextflow.log` is the run log. Fix the cause, run the same command:
+finished tasks are reused.
 
 | message / symptom | cause | what to do |
 |---|---|---|

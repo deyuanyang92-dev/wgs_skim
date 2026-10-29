@@ -83,3 +83,28 @@ snakemake -s workflow/compare_batch.smk --cores 16 --config results=/path/result
 ```
 
 集群：加 Snakemake 的执行器插件，如 `--executor slurm`，每个任务的 `threads` / `mem_mb` 会成为作业的资源申请。
+
+## 用 Nextflow 运行
+
+同一流程的 Nextflow（DSL2）版本：同样的步骤、参数、输出目录结构，调用同样的脚本和 conda 环境。
+
+```bash
+wgs_skim run --engine nextflow -r raw/ -o res/ -j 64 --mem-gb 200      # 选项与 Snakemake 相同，自动 -resume
+wgs_skim run --engine nextflow -r raw/ -o res/ -n                      # = nextflow -preview
+nextflow run nextflow/main.nf -profile conda --reads_dir raw/ --outdir res/ -resume   # 直接调用
+nextflow run nextflow/main.nf -profile slurm ...                       # 集群（未测试）
+```
+
+- 续跑：中断后运行同一条命令（`-resume`，缓存在 `res/work/`）；实测再次运行 38 个任务全部 "Cached"，8 秒。
+- 资源：每个进程的 `cpus` / `memory` 与上表相同；在 `-j` / `--mem-gb` 之内调度；失败自动重试一次（SPAdes 1.5 倍、GetOrganelle 2 倍内存）。
+- 运行记录：`res/pipeline_info/`（trace、report.html、timeline.html）。
+- 实测：双样品数据 `summary/samples.tsv` 与 Snakemake 完全相同，各结果文件逐字节相同。
+
+与 Snakemake 版本的区别：
+
+| | Snakemake | Nextflow |
+|---|---|---|
+| SPAdes 其他模式、Trinity（`--spades-modes`、`--steps rna`） | 支持 | 暂不支持（会提示改用 Snakemake） |
+| `wgs_skim nuclear` / `compare --results` 批量 | 支持 | 只用 Snakemake |
+| 某任务两次失败后 | 其他样品继续（keep-going） | 等正在运行的任务结束后停止 |
+| SPAdes 重试 | 从检查点继续 | 重新开始 |

@@ -126,6 +126,9 @@ MitoM 自身的测试（`~/mybiosofts/Mitom/tests/`，mitotools 环境）：**48
 | 14 | 代码审查 | 个人配置 `~/.wgs_skim/config.yaml` 中的 `db_dir` 被命令行默认值覆盖 | 用户写的值优先 |
 | 15 | 代码审查 | Excel 导出的 UTF-8 样品表（BOM）报 KeyError | 按 utf-8-sig 读取 |
 | 16 | 运行中 | 整个机器内存紧张时后台任务被停止，一夜无结果 | 每个规则声明内存，Snakemake 按核数和内存调度；核基因批量每完成一个样品就写 `summary.tsv`；`--status` 查看进度 |
+| 17 | Nextflow 实跑 | BUSCO 6：`-l metazoa_odb12`（Nextflow 暂存的链接名）被当作 lineage 名称去 `./busco_downloads` 查找 → "Dataset ... does not exist" | `-l $(readlink -f lineage)`：给完整路径（与 Snakemake 相同） |
+| 18 | Nextflow 实跑 | topology：`stageAs: 'fasta/*'` 的文件 `.name` 已含 `fasta/` → 路径成了 `fasta/fasta/x` | 传暂存路径本身（`names()`） |
+| 19 | Nextflow 实跑 | summary.py 不写日志，Nextflow 缺少输出 `logs/summary.log` 而失败 | `smk_shim.py` 像 Snakemake 一样预先建好输出 / 日志目录并创建日志文件 |
 
 ---
 
@@ -137,9 +140,9 @@ MitoM 自身的测试（`~/mybiosofts/Mitom/tests/`，mitotools 环境）：**48
 | 全新机器上从零安装（`wgs_skim install` 含数据库下载） | 未在干净机器上测试 |
 | 在线 NCBI BLAST（`-remote`） | 测试均用本地小库（`build-blastdb`） |
 | 集群（Slurm 等 executor） | 未测试 |
+| Nextflow 版本：Slurm profile、`--samples` 样品表、`scaffolds` 列、`-profile conda` 在没有 Snakemake 环境时自建环境 | 未测试（本地 executor + 已有 Snakemake 环境已测，见第 10 节） |
 | 读深度图（旧脚本 using_bwa_draw_coverage） | 未移植（MitoM `mito_plot.py` 可画） |
 | `wgs_skim compare` 在最新代码上的真实数据重跑 | 单元测试覆盖；真实数据最后一次在 2026-10-28 |
-| Nextflow 版本 | 开发中（见 README） |
 
 ---
 
@@ -199,3 +202,24 @@ BUSCO 低是数据量太小（完整转录组通常需要 ≥ 2 Gb）所致；�
 
 Trinity：第二阶段为每个 read 簇单独运行一次（A1 有 13 961 个簇），在机器被其他 SPAdes 任务占满时很慢（20 分钟约 7 %）。
 结果（转录本数、BUSCO）运行结束后补在这里。
+
+## 10. Nextflow 版本（`nextflow/main.nf`，2026-10-29）
+
+Nextflow 25.04.2，本地 executor，`-profile conda`（直接复用 `wgs_skim install` 建好的 Snakemake 环境：YAML 内容相同即用），
+数据库 `~/.wgs_skim/db`（`storeDir`，已存在 → 3 个数据库任务 "Stored"，不重做）。
+
+| 测试 | 命令 | 结果 |
+|---|---|---|
+| stub（只建 DAG，不跑软件） | `nextflow run nextflow/main.nf -stub-run --reads_dir data2 --outdir nf_stub/results --db_dir nf_stub/db` | 42 个任务全部完成（2 样品 × 18 + BLAST + SUMMARY + 4 个数据库），输出目录结构与 Snakemake 相同；数秒 |
+| stub `--steps` | `fastp` / `busco` / `getorganelle` / `nuclear` / `blast` / `summary` / 错误名称 | 每个只运行所需任务（如 `busco` = FASTP + SPADES + BUSCO + BUSCO_LINEAGE；`getorganelle` 不跑 MEANGS）；未知步骤报错并列出可选名称 |
+| 实跑（data2，2 样品各 1 M 对） | `wgs_skim run --engine nextflow -r data2 -o nf_e2e -j 32 --mem-gb 120 --config mt_iter_rounds=1 topology_pairs=200000`（设置与 Snakemake 的 e2e2 相同） | 发现并修复错误 17–19（每次修复后同一命令 `-resume` 续跑，只重跑受影响的任务）；最终 38 个任务成功 |
+| 与 Snakemake 比较 | `diff e2e2/summary/samples.tsv nf_e2e/summary/samples.tsv` | **完全相同**。逐文件比较（mito / rdna / histone / assembly / nuclear / annotation / topology / blast）：全部字节相同，只有 BUSCO 摘要与 GenomeScope 摘要中记录的输入文件路径不同；MEANGS 种子长度略有不同（12 289 vs 12 380 bp，MEANGS 每次运行有随机性），最终线粒体相同 |
+| `-resume` | 同一命令再运行两次 | 38 个任务 "Cached" + 3 个数据库 "Stored"，0 个新任务，8 秒 |
+| 续跑的粒度 | 只改 topology 输入的写法 / 只改 `smk_shim.py` | 只有 TOPOLOGY（及其下游）重跑 / 只有用 shim 的任务重跑（Nextflow 把 `bin/` 脚本内容计入任务哈希） |
+| `--steps summary` | 对已有的 nf_e2e 结果 | 只运行 SUMMARY，`samples.tsv` 与 Snakemake 相同 |
+| Snakemake 路径未变 | `wgs_skim run -r data2 -n` | 与之前相同（39 个任务的 dry run） |
+| 单元测试 | `python -m pytest -q tests/` | 新增 `test_smk_shim_runs_snakemake_script`（nuc_copies.py 经 shim 运行）；16 通过，1 跳过（该 Python 无 Biopython） |
+
+资源（`pipeline_info/trace_*.tsv`，峰值内存）：BLAST 47.5 GB（本地库映射入内存，与 Snakemake 相同），MT_ITERATE 6–10 GB，
+SPAdes 4.8 GB（申请 32 GB = `spades_min_mem_gb`），其余 < 7 GB。运行期间机器上还有其他任务（负载 50–110），总用时约 55 分钟（含修复后的续跑）。
+

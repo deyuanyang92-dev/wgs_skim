@@ -1,9 +1,10 @@
-"""wgs_skim command line: a thin wrapper that builds the Snakemake command for you.
+"""wgs_skim command line: a thin wrapper that builds the Snakemake (or Nextflow) command for you.
 
     wgs_skim run -r /path/to/rawdata                  # everything automatic (annelid preset)
     wgs_skim run -r rawdata -o results --taxon fish -j 64
     wgs_skim run -r rawdata -n                        # dry run: show what would run
     wgs_skim run -r rawdata --steps fastp,spades,busco   # only some steps (plus what they need)
+    wgs_skim run -r rawdata --engine nextflow         # the same run with Nextflow (-resume, work/ in the results)
     wgs_skim install                                  # create all software environments once
     wgs_skim samples -r rawdata                       # show detected sample names
     wgs_skim circularize -i mitofinder_mt.fasta --spades spades_dir   # circularize MitoFinder / SPAdes contigs
@@ -12,7 +13,7 @@
     wgs_skim nuclear --results results/ -o nuclear/   # rDNA + histones: GetOrganelle, MitoM .gbf, vs SPAdes
     wgs_skim config > my.yaml                         # all options with comments
 
-Anything after `--` goes to snakemake unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
+Anything after `--` goes to snakemake (or nextflow) unchanged, e.g. `wgs_skim run -r rawdata -- --set-threads spades=48`.
 Personal defaults (local nt, e-mail, BUSCO lineage path ...) go in ~/.wgs_skim/config.yaml and apply to every run.
 """
 import argparse
@@ -106,8 +107,10 @@ def cmd_run(args, passthrough):
             "outdir": ".", "db_dir": HOME / "db", "taxon": args.taxon, "blast_db": args.blast_db, "email": args.email,
             "busco_lineage": args.busco_lineage, "steps": args.steps,
             "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes}
-    cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
     mem = args.mem_gb or int(machine_mem_gb() * 0.9)
+    if args.engine == "nextflow":
+        return run_nextflow(args, conf, out, mem, passthrough)
+    cmd = base_cmd(args, conf) + ["-d", str(out), "--cores", str(args.cores)]
     if mem:                                           # every rule declares mem_mb: jobs are scheduled by memory too
         cmd += ["--resources", f"mem_mb={int(mem * 1024)}"]
     if args.dry_run:
@@ -115,6 +118,45 @@ def cmd_run(args, passthrough):
     cmd += passthrough
     print(f"[wgs_skim] results: {out}\n[wgs_skim] {shlex.join(cmd)}", flush=True)
     return subprocess.run(cmd).returncode
+
+
+def run_nextflow(args, conf, out, mem, passthrough):
+    """The same run with Nextflow (nextflow/main.nf): the same options as params, always -resume, work/ in the
+    results directory. ~/.wgs_skim/config.yaml and --configfile are merged into one -params-file (Nextflow takes
+    one); command-line options win over both, as with Snakemake."""
+    import yaml
+    exe = shutil.which("nextflow")
+    if not exe:
+        sys.exit("[wgs_skim] nextflow not found: conda install -c bioconda nextflow (or use --engine snakemake)")
+    other = [m for m in str(args.spades_modes or "genome").split(",") if m.strip() not in ("", "genome")]
+    if other or set(str(args.steps or "").split(",")) & {"rna", "rnaspades", "trinity", "transcriptome"}:
+        sys.exit("[wgs_skim] other SPAdes modes and Trinity run with the Snakemake engine only (drop --engine nextflow)")
+    params = {}
+    for f in [USER_CONFIG] + ([Path(args.configfile)] if args.configfile else []):
+        if Path(f).is_file():
+            params.update(yaml.safe_load(Path(f).read_text()) or {})
+    given = set(params)
+    conf = dict(conf, outdir=out)
+    params_file = out / "nextflow_params.yaml"
+    params_file.write_text(yaml.safe_dump(params, sort_keys=False))
+    cmd = [exe, "run", str(workflow_root() / "nextflow" / "main.nf"), "-profile", "conda", "-resume",
+           "-work-dir", str(out / "work"), "-params-file", str(params_file)]
+    opts = {k: v for k, v in conf.items() if v not in (None, "") and not (k == "db_dir" and k in given)}
+    opts |= {"max_cpus": args.cores, "python": sys.executable, "conda_prefix": args.conda_prefix}
+    if mem:
+        opts["max_memory"] = f"{mem} GB"
+    for kv in getattr(args, "config", None) or []:
+        k, _, v = kv.partition("=")
+        opts[k] = v
+    for k, v in opts.items():
+        if v not in (None, ""):
+            cmd += [f"--{k}", str(v)]
+    if args.dry_run:
+        cmd.append("-preview")
+    cmd += passthrough
+    env = dict(os.environ, WGS_SKIM_CONDA_PREFIX=str(args.conda_prefix))
+    print(f"[wgs_skim] results: {out}\n[wgs_skim] {shlex.join(cmd)}", flush=True)
+    return subprocess.run(cmd, cwd=str(out), env=env).returncode   # .nextflow/ (the -resume cache) lives there
 
 
 def cmd_install(args, passthrough):
@@ -266,6 +308,9 @@ def main(argv=None):
                    help="memory the jobs may use together (default: 90%% of the machine); every rule declares "
                         "its need, SPAdes from the data size")
     r.add_argument("-n", "--dry-run", action="store_true", help="only show what would be run")
+    r.add_argument("--engine", choices=["snakemake", "nextflow"], default="snakemake",
+                   help="workflow manager: Snakemake (workflow/Snakefile) or Nextflow (nextflow/main.nf, run with "
+                        "-resume in the results directory)")
     r.add_argument("--steps", metavar="STEP[,STEP]",
                    help="run only these steps (and what they need): fastp, meangs, mito (MEANGS + GetOrganelle), "
                         "getorganelle (without MEANGS), nr (rDNA + histones), spades, busco, genome_size, annotate, "

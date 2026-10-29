@@ -247,3 +247,23 @@ def test_compare_and_status_from_consensus_dirs(tmp_path):
     nm.write_rows(tmp_path / "summary.tsv", list(rows.values()))
     (line,) = nm.status(tmp_path, ("histone",))
     assert line.startswith("S1") and "histone compared +spades" in line and "differ" in line
+
+
+def test_smk_shim_runs_snakemake_script(tmp_path):
+    """nextflow/bin/smk_shim.py: a `script:` script (nuc_copies.py) reads the JSON as its `snakemake` object."""
+    import json
+    import subprocess
+    busco = tmp_path / "busco" / "run_x"
+    busco.mkdir(parents=True)
+    (busco / "full_table.tsv").write_text("# head\n" + "".join(
+        f"b{i}\tComplete\tNODE_{i}_length_900_cov_{c}\n" for i, c in enumerate((9.0, 10.0, 11.0))))
+    (tmp_path / "f.tsv").write_text("gene\tcontig\n18S\tNODE_7_length_8000_cov_300.0\n")
+    (tmp_path / "c.tsv").write_text("gene\tlength\tpartial_5\tpartial_3\n18S\t1800\t0\t0\n")
+    spec = {"input": {"features": "f.tsv", "consensus": "c.tsv", "busco": "b.txt"}, "output": {"tsv": "out.tsv"},
+            "params": {"busco_dir": "busco"}, "log": ["log"], "wildcards": {"sample": "S"},
+            "scriptdir": str(HERE.parent / "workflow" / "scripts")}
+    (tmp_path / "smk.json").write_text(json.dumps(spec))
+    subprocess.run([sys.executable, str(HERE.parent / "nextflow" / "bin" / "smk_shim.py"), "smk.json",
+                    str(HERE.parent / "workflow" / "scripts" / "nuc_copies.py")], cwd=tmp_path, check=True)
+    rows = (tmp_path / "out.tsv").read_text().splitlines()
+    assert rows[1].split("\t") == ["18S", "1800", "", "1", "300.0", "10.00", "30"]

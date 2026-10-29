@@ -39,6 +39,7 @@ tests/cli_matrix.sh small/ e2e_out/
 | 核基因批量（`wgs_skim nuclear`，Snakemake） | 8 个任务成功；再次运行 "Nothing to be done"（2 秒） |
 | 线粒体比较批量（`wgs_skim compare --results`） | 4 个样品 110 秒：identical / consistent / consistent / skipped（缺 MitoFinder） |
 | 真实批量 MJ20260820041（22 个样品） | rDNA 注释全部通过 NCBI table2asn（0 错误） |
+| Nextflow 版本（同一双样品数据） | 38 个任务成功；`samples.tsv` 与 Snakemake 完全相同；`-resume` 全部缓存，8 秒 |
 | 转录组（rnaSPAdes + Trinity + BUSCO，2 个样品各 0.1 Gb） | 见下 |
 
 ### 转录组测试
