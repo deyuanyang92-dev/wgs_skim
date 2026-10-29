@@ -85,7 +85,9 @@ def run_mitofinder(sample, ref, out, assembly=None, r1=None, r2=None, assembler=
     bind = [Path(b).resolve().parent for b in [*bind, ref]] + [wd, out]
     cmd = mitofinder_exe(sif, bind) + ["-j", sample, *data, "-r", ref, "-o", code, "-p", threads, "-m", int(mem_gb),
                                        "-t", trna, "--min-contig-size", min_contig, "--adjust-direction"]
-    if run(cmd, log, cwd=wd):
+    # MitoFinder exits 0 after "Aborting." (e.g. bioconda 1.4.1 without install.sh.ok: "MitoFinder is not
+    # installed") - that is a failure, not "no mitochondrial contig"
+    if run(cmd, log, cwd=wd) or "Aborting" in Path(log).read_text(errors="replace"):
         with open(log, "a") as fh:
             fh.write("[wgs_skim] MitoFinder failed\n")
         raise RuntimeError(f"MitoFinder failed on {sample}; see {log}")
