@@ -266,6 +266,11 @@ def compare(sample, kind, go_dir, spades_dir):
     """One row per gene: GetOrganelle vs SPAdes-MitoM consensus. verdict: identical | contained (the shorter,
     partial one is identical inside the longer) | differ | only GetOrganelle | only SPAdes-MitoM"""
     go, sp = consensus(go_dir) if go_dir else {}, consensus(spades_dir) if spades_dir else {}
+    # a gene MitoM lists with an empty consensus was not assembled (MJ20260820041 CHY002 / CHY008 / CHY010: SPAdes
+    # ITS1 / ITS2 of 0 nt - the spacer between contigs; aligning it raised "sequence has zero length" and lost the
+    # sample's whole rDNA comparison)
+    empty = [f"{k} {g}" for k, d in (("GetOrganelle", go), ("SPAdes-MitoM", sp)) for g in list(d) if not d[g][0]]
+    go, sp = {g: v for g, v in go.items() if v[0]}, {g: v for g, v in sp.items() if v[0]}
     rows = []
     for g in GENES[kind]:
         if g not in go and g not in sp:
@@ -286,6 +291,8 @@ def compare(sample, kind, go_dir, spades_dir):
                      else "identical" if len(a) == len(b) else "contained")
         else:
             r["verdict"] = "only GetOrganelle" if g in go else "only SPAdes-MitoM"
+            if any(e.endswith(f" {g}") for e in empty):
+                r["verdict"] += " (" + ", ".join(e for e in empty if e.endswith(f" {g}")) + ": empty consensus)"
         rows.append(r)
     return rows
 
