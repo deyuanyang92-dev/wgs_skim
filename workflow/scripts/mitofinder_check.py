@@ -12,14 +12,14 @@ Writes, in the output directory:
   samples_check.tsv   per sample: majority family / organism, genes agreeing, flagged genes, verdict
 """
 import argparse
-import csv
 import sys
 from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blast_taxonomy import blast_topn  # noqa: E402
-from seqtools import read_fasta  # noqa: E402
+from seqtools import read_fasta, write_fasta  # noqa: E402
+from tables import write_tsv  # noqa: E402
 
 
 def family(taxonomy):
@@ -100,13 +100,6 @@ def check(rows, qids, min_pident, min_qcov=50):
     return genes, samples
 
 
-def write(path, rows, cols):
-    with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t", extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--genes-dir", required=True)
@@ -121,13 +114,12 @@ def main():
     out = Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
     qs = queries(a.genes_dir, a.genes)
-    with open(out / "query.fasta", "w") as fh:
-        fh.writelines(f">{n}\n{q}\n" for n, q in qs)
+    write_fasta(qs, out / "query.fasta", width=0)
     rows = blast_topn(out / "query.fasta", out / "blast_topn.tsv", a.db, a.topn, a.threads, a.email)
     genes, samples = check(rows, [n for n, _ in qs], a.min_pident)
-    write(out / "genes_check.tsv", genes,
-          ["sample", "gene", "query", "best_hit", "organism", "family", "pident", "qcovs", "verdict"])
-    write(out / "samples_check.tsv", samples, ["sample", "family", "organism", "genes_agree", "flagged", "verdict"])
+    write_tsv(out / "genes_check.tsv", genes,
+              ["sample", "gene", "query", "best_hit", "organism", "family", "pident", "qcovs", "verdict"])
+    write_tsv(out / "samples_check.tsv", samples, ["sample", "family", "organism", "genes_agree", "flagged", "verdict"])
     for s in samples:
         print(f"{s['sample']}: {s['verdict']} ({s['genes_agree']} genes {s['family']})")
 

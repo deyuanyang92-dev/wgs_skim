@@ -147,3 +147,9 @@ if __name__ == "__main__":
     import sys
     for s, (r1, r2) in find_pairs(sys.argv[1]).items():
         print(s, r1, r2, sep="\t")
+
+
+def by_sample(files):
+    """sample -> file (Path) from the per-sample layout <...>/<sample>/<sample>.<ext> (the directory, not a name
+    prefix: samples X and X.1 stay apart)"""
+    return {Path(f).parent.name: Path(f) for f in files or []}

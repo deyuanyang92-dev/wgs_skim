@@ -32,21 +32,16 @@ Usage:  circularize.py -i mt_contigs.fasta -o out/ [--spades spades_dir] [--pref
         -> out/<prefix>.circularized.fasta, out/<prefix>.circularize.tsv
 """
 import argparse
-import csv
 import itertools
 import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from seqtools import find_circle, read_fasta, write_fasta  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from seqtools import find_circle, rc, read_fasta, write_fasta  # noqa: E402,F401  (rc: also imported from here)
+from tables import write_tsv  # noqa: E402
 
-COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 FLIP = {"+": "-", "-": "+"}
-
-
-def rc(s):
-    return s.translate(COMP)[::-1]
 
 
 def read_paths(path_file, names):
@@ -307,13 +302,9 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     rows, seqs = circularize(read_fasta(a.input), a.spades)
     circ = {r["contig"] for r in rows if r["method"] != "not_circular"}
-    with open(out / f"{a.prefix}.circularized.fasta", "w") as fh:
-        write_fasta([(f"{a.prefix}|{n} {'circular' if n in circ or n == 'joined' else 'linear'} length={len(s)}", s)
-                     for n, s in seqs], fh)
-    with open(out / f"{a.prefix}.circularize.tsv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=FIELDS, delimiter="\t")
-        w.writeheader()
-        w.writerows({"sample": a.prefix, **r} for r in rows)
+    write_fasta([(f"{a.prefix}|{n} {'circular' if n in circ or n == 'joined' else 'linear'} length={len(s)}", s)
+                 for n, s in seqs], out / f"{a.prefix}.circularized.fasta")
+    write_tsv(out / f"{a.prefix}.circularize.tsv", ({"sample": a.prefix, **r} for r in rows), FIELDS)
     for r in rows:
         print("\t".join(str(r[k]) for k in FIELDS[1:]))
 

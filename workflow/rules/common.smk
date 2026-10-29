@@ -6,7 +6,12 @@ from pathlib import Path
 
 from snakemake.utils import validate
 
+# `--config key=` (an empty value, e.g. mitofinder_sif= for the bioconda MitoFinder) arrives as None: it means ""
+for _k, _v in list(config.items()):
+    if _v is None:
+        config[_k] = ""
 validate(config, schema="../schemas/config.schema.yaml")
+PY = sys.executable           # Snakemake's Python 3, for standard-library scripts run inside older tool environments
 
 sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
 from samples import find_pairs, read_sheet, sheet_columns  # noqa: E402

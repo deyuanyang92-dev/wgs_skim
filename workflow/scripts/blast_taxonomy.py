@@ -9,7 +9,6 @@ Output: one row per (query, hit), best first: the TopN distinct accessions per q
 The search + metadata part (blast_topn) is also used by mitofinder_check.py, and runs on any FASTA:
     blast_taxonomy.py --query q.fasta -o hits.tsv [--db LOCAL_DB] [--topn 5] [--threads 8] [--email E]
 """
-import csv
 import subprocess
 import sys
 import time
@@ -20,7 +19,9 @@ from Bio import Entrez, SeqIO
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
 if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
     sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
+from samples import by_sample  # noqa: E402
 from seqtools import read_fasta  # noqa: E402
+from tables import write_tsv  # noqa: E402
 
 FIELDS = "qseqid sacc stitle pident length mismatch gapopen qstart qend sstart send evalue bitscore qcovs slen".split()
 GB_FIELDS = ["organism", "taxonomy", "definition", "seq_length", "topology", "reference"]
@@ -67,12 +68,6 @@ def nr_regions(gb):
             if len(seq) > len(regions.get("its", "")) and hi - lo < 3000:
                 regions["its"] = seq
     return regions
-
-
-def by_sample(files):
-    """sample -> file from the per-sample directory <...>/<sample>/<sample>.<ext> (a name prefix would confuse
-    samples X and X.1)"""
-    return {Path(f).parent.name: f for f in files}
 
 
 def queries(locus, fastas, gbs, wanted, extract):
@@ -140,10 +135,7 @@ def blast_topn(query, out_tsv, db="", topn=5, threads=8, email=""):
             if not r["organism"]:
                 r["organism"] = "(efetch failed)"            # visible in the table, not only in the log
 
-    with open(out_tsv, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=FIELDS + GB_FIELDS, delimiter="\t", extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
+    write_tsv(out_tsv, rows, FIELDS + GB_FIELDS)
     print(f"{len(rows)} hits for {len({r['qseqid'] for r in rows})} sequences", file=sys.stderr)
     return rows
 

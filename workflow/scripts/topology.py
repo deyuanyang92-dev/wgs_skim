@@ -16,32 +16,22 @@ params.mode: auto = only linear mitogenomes are checked (circular ones are liste
 sequence, the rDNA too (its "circle" is the tandem repeat unit). Short reads can show that a junction is real, but
 never prove a linear molecule: linear_unjoined may be a gap longer than the insert size (long reads / PCR needed).
 """
-import csv
 import json
 import re
+import shutil
 import statistics
-import subprocess
 import sys
 from pathlib import Path
 
-try:
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
+if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
     sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
-except NameError:                            # imported by the tests: the scripts directory is on sys.path already
-    pass
-from seqtools import find_circle, read_fasta  # noqa: E402
+from runtools import sh  # noqa: E402
+from seqtools import find_circle, rc, read_fasta, write_fasta  # noqa: E402
+from tables import write_tsv  # noqa: E402
 
 FLANK, PAIRS, THREADS = 20, 0, 4
 CIG = re.compile(r"(\d+)([MIDNSHP=X])")
-COMP = str.maketrans("ACGTN", "TGCAN")
-
-
-def write_fasta(path, recs):
-    with open(path, "w") as fh:
-        fh.writelines(f">{n}\n{q}\n" for n, q in recs)
-
-
-def sh(cmd):
-    subprocess.run(f"set -o pipefail; {cmd}", shell=True, check=True, executable="/bin/bash", stderr=sys.stderr)
 
 
 # ── annotation: where to cut (nad5) ───────────────────────────────────────────
@@ -75,7 +65,7 @@ def split_point(s, ann):
     for q, cds in ann:
         if len(q) != L or not cds:
             continue
-        for strand, t in ((1, s), (-1, s.translate(COMP)[::-1])):
+        for strand, t in ((1, s), (-1, rc(s))):
             o = (t + t).find(q)
             if 0 <= o < L:
                 g = next((c for c in cds if c[0] == "nad5"), None) or max(cds, key=lambda c: c[2] - c[1])
@@ -182,7 +172,7 @@ def end_diagnosis(side, n, tails, terminal, med):
 
 def map_reads(ref_seq, name, wd, reads):
     ref = f"{wd}/{name}.fasta"
-    write_fasta(ref, [(name, ref_seq)])
+    write_fasta([(name, ref_seq)], ref, width=0)
     sh(f"bwa index {ref} 2>/dev/null && bwa mem -t {THREADS} {ref} {reads} 2>/dev/null "
        f"| samtools view -F 0x904 - > {wd}/{name}.sam")
     return f"{wd}/{name}.sam"
@@ -214,7 +204,7 @@ def main(sm):
     rows = []
     if recs:
         # 1. keep only the read pairs that map to any of the sequences (fast: one bwa run on the first PAIRS pairs)
-        write_fasta(f"{wd}/all.fasta", [(f"s{i}", s) for i, (_, s) in enumerate(recs)])
+        write_fasta([(f"s{i}", s) for i, (_, s) in enumerate(recs)], f"{wd}/all.fasta", width=0)
         head = f"| head -n {PAIRS * 4}" if PAIRS else ""
         sh(f"bwa index {wd}/all.fasta 2>/dev/null && bwa mem -t {sm.threads} {wd}/all.fasta "
            f"<(zcat -f {sm.input.r1} {head}) <(zcat -f {sm.input.r2} {head}) 2> {wd}/mem.log "
@@ -263,17 +253,14 @@ def main(sm):
                     end_diagnosis(e, ends[e][0], ends[e][1], s[:30] if e == "L" else s[-30:], med) for e in "LR")))
             print(rows[-1], file=sys.stderr, flush=True)
             if verdict in ("circular_validated", "circular_repeat_junction"):
-                write_fasta(out_dir / f"{name.replace('|', '_')}.circular.fasta", [(name, circle)])
+                write_fasta([(name, circle)], out_dir / f"{name.replace('|', '_')}.circular.fasta", width=0)
 
     rows += [dict(sample=sm.wildcards.sample, contig=n, length=L, verdict=v) for n, L, v in skipped]
     fields = ["sample", "contig", "length", "circle_length", "overlap_bp", "split_at", "junction_reads",
               "control_reads_median", "bridging_pairs", "gap_estimate_bp", "end_clip", "verdict", "end_diagnosis"]
-    with open(sm.output.tsv, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t")
-        w.writeheader()
-        w.writerows(rows)
-    subprocess.run(["rm", "-rf", str(wd)])
+    write_tsv(sm.output.tsv, rows, fields)
+    shutil.rmtree(wd, ignore_errors=True)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "snakemake" in globals():
     main(snakemake)  # noqa: F821

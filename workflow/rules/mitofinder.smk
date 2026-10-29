@@ -61,9 +61,11 @@ def mitofinder_min_contig(src):
 
 rule mitofinder_input:
     """what MitoFinder searches: a whole-genome assembly cut to its deep scaffolds (>= mitofinder_cov_factor x the
-    weighted median coverage; the mitogenome is far deeper than the nuclear genome), transcripts by length only"""
+    weighted median coverage; the mitogenome is far deeper than the nuclear genome) plus the scaffolds the reference
+    hits (low-coverage skims), transcripts by length only (scripts/mitofinder_prefilter.py)"""
     input:
-        mitofinder_assembly,
+        asm=mitofinder_assembly,
+        ref=mitofinder_ref,
     output:
         temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta"),
     params:
@@ -71,15 +73,16 @@ rule mitofinder_input:
         factor=lambda w: 0 if w.src in MF_TRANSCRIPTS else config["mitofinder_cov_factor"],
     log:
         f"{OUT}logs/mitofinder/{{src}}/{{sample}}.input.log",
+    threads: 4
     resources:
-        mem_mb=2000,
+        mem_mb=4000,
     wildcard_constraints:
         src="spades|given|rna|trinity",
     conda:
-        "../envs/python.yaml"
+        "../envs/blast.yaml"
     shell:
-        "python {workflow.basedir}/scripts/mitofinder_prefilter.py {input} {output} --min-len {params.min_len} "
-        "--factor {params.factor} > {log} 2>&1"
+        "python {workflow.basedir}/scripts/mitofinder_prefilter.py {input.asm} {output} --min-len {params.min_len} "
+        "--factor {params.factor} --ref {input.ref} --threads {threads} > {log} 2>&1"
 
 
 def mitofinder_inputs(wildcards):
@@ -99,12 +102,6 @@ def mitofinder_mem_mb(wildcards, input, attempt):
     return int(config["mitofinder_mem_gb"] * 1024 * 1.5 ** (attempt - 1))
 
 
-def bind_dirs(wildcards, input, output):
-    """directories Singularity must see: every input (symlinks resolved) and the output"""
-    dirs = {os.path.dirname(os.path.realpath(str(f))) for f in input} | {os.path.abspath(os.path.dirname(output.fasta))}
-    return " ".join(f"-B {d}" for d in sorted(dirs))
-
-
 rule mitofinder:
     """MitoFinder on one sample and source -> <s>.mitofinder.fasta / .gb (all mitochondrial contigs), Final_Results/"""
     input:
@@ -113,18 +110,14 @@ rule mitofinder:
         fasta=f"{OUT}mitofinder/{{src}}/{{sample}}/{{sample}}.mitofinder.fasta",
         gb=f"{OUT}mitofinder/{{src}}/{{sample}}/{{sample}}.mitofinder.gb",
     params:
-        wd=lambda w, output: str(Path(output.fasta).parent / "run"),
-        res=lambda w, output: str(Path(output.fasta).parent / "Final_Results"),
-        reads_mode=lambda w: "yes" if w.src in ("megahit", "metaspades") else "",
+        out=lambda w, output: str(Path(output.fasta).parent),
+        data=lambda w, input: (f"-1 {input.r1} -2 {input.r2} --assembler {w.src}" if "r1" in input.keys()
+                               else f"-a {input.assembly}"),
         pairs=config["mitofinder_max_pairs"],
         code=config["genetic_code"],
         trna=config["mitofinder_trna"],
         min_contig=lambda w: mitofinder_min_contig(w.src),
-        sif=config["mitofinder_sif"],
-        binds=bind_dirs,
-        r1=lambda w, input: input.get("r1", ""),
-        r2=lambda w, input: input.get("r2", ""),
-        assembly=lambda w, input: input.get("assembly", ""),
+        sif=f"--sif {config['mitofinder_sif']}" if config["mitofinder_sif"] else "",
     resources:
         mem_mb=mitofinder_mem_mb,
     log:
@@ -137,49 +130,9 @@ rule mitofinder:
     conda:
         "../envs/mitofinder.yaml"
     shell:
-        """
-        wd=$(realpath -m {params.wd}); res=$(realpath -m {params.res}); log=$(realpath -m {log})
-        ref=$(realpath {input.ref})
-        rm -rf $wd $res; mkdir -p $wd
-        if [ -n "{params.reads_mode}" ]; then      # MitoFinder's author: 5-10 M pairs are enough for the mitogenome
-            n=$(( {params.pairs} * 4 ))
-            if [ $n -gt 0 ]; then
-                (zcat -f {params.r1} | head -n $n || true) | gzip -1 > $wd/R1.fq.gz
-                (zcat -f {params.r2} | head -n $n || true) | gzip -1 > $wd/R2.fq.gz
-            else
-                ln -s $(realpath {params.r1}) $wd/R1.fq.gz; ln -s $(realpath {params.r2}) $wd/R2.fq.gz
-            fi
-            data="-1 $wd/R1.fq.gz -2 $wd/R2.fq.gz --{wildcards.src}"
-        else
-            if [ ! -s {params.assembly} ]; then
-                echo "[wgs_skim] no contig >= {params.min_contig} bp to search" > $log; : > {output.fasta}; : > {output.gb}
-                rm -rf $wd; exit 0
-            fi
-            cp {params.assembly} $wd/assembly.fasta
-            data="-a $wd/assembly.fasta"
-        fi
-        mf=mitofinder
-        [ -n "{params.sif}" ] && mf="singularity exec --cleanenv {params.binds} -B $wd {params.sif} mitofinder"
-        mem=$(( {resources.mem_mb} / 1024 ))
-        cd $wd
-        $mf -j {wildcards.sample} $data -r $ref -o {params.code} -p {threads} -m $mem -t {params.trna} \
-            --min-contig-size {params.min_contig} --adjust-direction > $log 2>&1 \
-            || {{ echo "[wgs_skim] MitoFinder failed" >> $log; exit 1; }}
-        final=$(ls -d {wildcards.sample}/*_Final_Results 2>/dev/null | head -1 || true)
-        asm=$(ls {wildcards.sample}/*_link_*.scafSeq 2>/dev/null | head -1 || true)
-        cd - > /dev/null
-        if [ -z "$final" ]; then
-            echo "[wgs_skim] MitoFinder found no mitochondrial contig" >> $log; : > {output.fasta}; : > {output.gb}
-        else
-            mv $wd/$final $res
-            ls $res/*_mtDNA_contig*.fasta | grep -v "_genes_" | xargs cat > {output.fasta}
-            ls $res/*_mtDNA_contig*.gb | xargs cat > {output.gb}
-        fi
-        if [ -n "{params.reads_mode}" ] && [ -n "$asm" ]; then     # MitoFinder's own assembly is kept
-            mv "$(realpath $wd/$asm)" {params.res}/../{wildcards.sample}.{wildcards.src}.contigs.fasta || true
-        fi
-        rm -rf $wd
-        """
+        "{PY} {workflow.basedir}/scripts/mitofinder_run.py -s {wildcards.sample} -r {input.ref} -o {params.out} "
+        "{params.data} --source {wildcards.src} --max-pairs {params.pairs} --code {params.code} --trna {params.trna} "
+        "--min-contig {params.min_contig} -p {threads} -m $(( {resources.mem_mb} / 1024 )) {params.sif} --log {log}"
 
 
 rule mitofinder_summary:

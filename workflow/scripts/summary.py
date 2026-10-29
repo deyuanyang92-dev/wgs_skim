@@ -3,9 +3,16 @@ import csv
 import html
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
+if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
+    sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
+from samples import by_sample  # noqa: E402
+from seqtools import fasta_lengths, n50  # noqa: E402,F401  (n50: also imported from here)
+from tables import write_tsv  # noqa: E402
 
 
 def num(x):
@@ -14,39 +21,6 @@ def num(x):
         return float(x)
     except (TypeError, ValueError):
         return 0.5 if str(x).startswith("<1") else 0.0
-
-
-def by_sample(files):
-    """Map sample -> file using the per-sample path pattern <...>/<sample>/<sample>.<ext>."""
-    out = {}
-    for f in files or []:
-        p = Path(f)
-        out[p.parent.name] = p
-    return out
-
-
-def fasta_lengths(path):
-    lens, n = [], 0
-    for line in open(path):
-        if line.startswith(">"):
-            if n:
-                lens.append(n)
-            n = 0
-        else:
-            n += len(line.strip())
-    if n:
-        lens.append(n)
-    return lens
-
-
-def n50(lens):
-    if not lens:
-        return ""
-    lens, half, acc = sorted(lens, reverse=True), sum(lens) / 2, 0
-    for x in lens:
-        acc += x
-        if acc >= half:
-            return x
 
 
 def busco_line(path):
@@ -143,10 +117,7 @@ def main(sm):
                 hit = f"{what}: {r.get('organism', '')} ({float(r['pident']):.1f}%, qcov {r.get('qcovs', '')}%)"
                 rows[s][f"blast_{locus}"] = "; ".join(x for x in (rows[s][f"blast_{locus}"], hit) if x)
 
-    with open(sm.output.tsv, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, delimiter="\t")
-        w.writeheader()
-        w.writerows(rows[s] for s in samples)
+    write_tsv(sm.output.tsv, (rows[s] for s in samples), cols)
 
     n_circ = sum(r["mt_circular"] == "yes" for r in rows.values())
     head = "".join(f"<th>{html.escape(c)}</th>" for c in cols)
@@ -173,5 +144,5 @@ def main(sm):
     """, encoding="utf-8")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and "snakemake" in globals():
     main(snakemake)  # noqa: F821

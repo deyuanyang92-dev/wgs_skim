@@ -28,15 +28,16 @@ and workflow/rules/nuclear.smk (within the workflow) - Snakemake schedules, logs
 """
 import argparse
 import csv
-import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from collect_fasta import clean  # noqa: E402
+from collect_fasta import clean, getorganelle_cmd, result_fasta  # noqa: E402,F401  (result_fasta: also from here)
+from runtools import blastn, output, run, tool_env  # noqa: E402
+from seqtools import is_circular as circular_header, iter_fasta  # noqa: E402
+from tables import write_tsv  # noqa: E402
 
 RES = Path(__file__).resolve().parents[2] / "resources"
 
@@ -60,12 +61,6 @@ COLS = ["sample", "marker", "gene", "getorganelle_nt", "getorganelle_partial", "
 
 
 # ── assembly ───────────────────────────────────────────────────────────────
-def result_fasta(d: Path):
-    """GetOrganelle's final sequence: complete graph first, scaffolds only as fallback (as collect_fasta.py)."""
-    fas = sorted(Path(d).glob("*.path_sequence.fasta")) if Path(d).is_dir() else []
-    return next((f for f in fas if "scaffolds" not in f.name), fas[0] if fas else None)
-
-
 def reads_per_file(r1, gb: float) -> int:
     """GetOrganelle --max-reads (reads per file) for gb Gb of paired reads; mean length of the first 2000 reads"""
     import gzip
@@ -80,7 +75,8 @@ def reads_per_file(r1, gb: float) -> int:
 
 
 def is_circular(fasta) -> bool:
-    return bool(fasta) and any(x.startswith(">") and "circular" in x for x in open(fasta))
+    """any record of the FASTA is circular"""
+    return bool(fasta) and any(circular_header(n) for n, _ in iter_fasta(fasta, upper=False))
 
 
 def label_gene(name: str, kind: str):
@@ -93,46 +89,37 @@ def label_gene(name: str, kind: str):
     return m.group(1) if m and "cluster" not in name and name.count("histone") <= 1 else None
 
 
-def genes_covered(fasta, label, kind, blastn="blastn"):
+def genes_covered(fasta, label, kind, blastn_exe="blastn"):
     """{gene: best label coverage %} of the result: how much of each gene it holds (blastn qcovs of the labels)"""
-    if not fasta:
+    if not fasta or not Path(fasta).stat().st_size:
         return {}
-    out = subprocess.run([blastn, "-query", str(label), "-subject", str(fasta), "-evalue", "1e-5",
-                          "-outfmt", "6 qseqid qcovs"], capture_output=True, text=True).stdout
-    names = {}
-    for line in open(label):
-        if line.startswith(">"):
-            names[line[1:].split()[0]] = line[1:].strip()
+    names = {n.split()[0]: n for n, _ in iter_fasta(label, upper=False)}
     cov = {}
-    for line in out.splitlines():
-        q, c = line.split("\t")
-        g = label_gene(names.get(q, q), kind)
+    for h in blastn(label, fasta, "qseqid qcovs", 1e-5, exe=blastn_exe):
+        g = label_gene(names.get(h["qseqid"], h["qseqid"]), kind)
         if g:
-            cov[g] = max(cov.get(g, 0), int(c))
+            cov[g] = max(cov.get(g, 0), int(h["qcovs"]))
     return cov
 
 
-def is_complete(fasta, kind=None, label=None, blastn="blastn", cov=None) -> bool:
+def is_complete(fasta, kind=None, label=None, blastn_exe="blastn", cov=None) -> bool:
     """the whole tandem unit: circular, or every core gene covered end to end by a label (module doc)"""
     if is_circular(fasta):
         return True
     if not fasta or not kind:
         return False
-    cov = cov if cov is not None else genes_covered(fasta, label or SEEDS[kind][1], kind, blastn)
+    cov = cov if cov is not None else genes_covered(fasta, label or SEEDS[kind][1], kind, blastn_exe)
     return all(cov.get(g, 0) >= 95 for g in CORE[kind])
 
 
-def label_bp(fasta, label, blastn="blastn") -> int:
+def label_bp(fasta, label, blastn_exe="blastn") -> int:
     """bases of the result covered by the label genes (blastn, e <= 1e-5): how much of the target unit it holds"""
-    if not fasta:
+    if not fasta or not Path(fasta).stat().st_size:
         return 0
-    out = subprocess.run([blastn, "-query", str(label), "-subject", str(fasta), "-evalue", "1e-5",
-                          "-outfmt", "6 sseqid sstart send"], capture_output=True, text=True).stdout
     pos = set()
-    for line in out.splitlines():
-        sid, a, b = line.split("\t")
-        a, b = sorted((int(a), int(b)))
-        pos.update((sid, x) for x in range(a, b + 1))
+    for h in blastn(label, fasta, "sseqid sstart send", 1e-5, exe=blastn_exe):
+        a, b = sorted((int(h["sstart"]), int(h["send"])))
+        pos.update((h["sseqid"], x) for x in range(a, b + 1))
     return len(pos)
 
 
@@ -159,33 +146,27 @@ def getorganelle(kind, r1, r2, out, threads=16, max_gb=(5, 10), seed=None, label
     if (out / "done").exists():
         return result_fasta(out)
     seed, label = seed or SEEDS[kind][0], label or SEEDS[kind][1]
-    env = dict(os.environ)                       # GetOrganelle finds bowtie2 / SPAdes / BLAST beside itself
-    if Path(exe).parent != Path("."):
-        env["PATH"] = f"{Path(exe).parent}{os.pathsep}{env['PATH']}"
+    env = tool_env(exe)                          # GetOrganelle finds bowtie2 / SPAdes / BLAST beside itself
     hist, prev = [], None
-    blastn = str(Path(exe).parent / "blastn") if (Path(exe).parent / "blastn").exists() else "blastn"
+    bn = str(Path(exe).parent / "blastn") if (Path(exe).parent / "blastn").exists() else "blastn"
     for k, gb in enumerate(max_gb, 1):
         d = out / f"round{k}"
         if k == 1 and given and result_fasta(given):
             keep(Path(given), d)
             f = result_fasta(d)
-            hist.append((k, f"given ({given})", "", f, label_bp(f, label, blastn),
-                         genes_covered(f, label, kind, blastn)))
+            hist.append((k, f"given ({given})", "", f, label_bp(f, label, bn), genes_covered(f, label, kind, bn)))
         elif r1 and Path(r1).exists():
             cap = reads_per_file(r1, gb)
-            cmd = [exe, "-1", str(r1), "-2", str(r2), "-o", str(d), "-F", "anonym", "-s", str(prev or seed),
-                   "--genes", str(label), "-P", "0", "-t", str(threads), "-R", str(rounds), "-k", kmers,
-                   "--max-reads", str(cap), "--reduce-reads-for-coverage", "inf", "--overwrite",
-                   "--bowtie2-options", BOWTIE2[kind]]
+            cmd = getorganelle_cmd(r1, r2, d, "anonym", threads, prev or seed, rounds, kmers, cap, genes=label,
+                                   extra=["-P", "0", "--bowtie2-options", BOWTIE2[kind]], exe=exe)
             d.mkdir(parents=True, exist_ok=True)
             seed_how = f"round {k - 1}" if prev else "bundled"
             log(f"{out.parent.name}/{out.name}: {kind} round {k}, {gb} Gb, seed {seed_how}")
-            with open(d / "getorganelle.stdout", "w") as fh:
-                rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, env=env).returncode
+            rc = run(cmd, d / "getorganelle.stdout", env=env)
             clean(d)
             f = result_fasta(d)
             hist.append((k, f"{gb} Gb ({cap} reads per file), seed {'round ' + str(k - 1) if prev else 'bundled'}",
-                         rc, f, label_bp(f, label, blastn), genes_covered(f, label, kind, blastn)))
+                         rc, f, label_bp(f, label, bn), genes_covered(f, label, kind, bn)))
         else:
             break
         top = max(h[4] for h in hist)
@@ -219,9 +200,9 @@ def getorganelle(kind, r1, r2, out, threads=16, max_gb=(5, 10), seed=None, label
 # ── annotation ─────────────────────────────────────────────────────────────
 def mitom_version(mitom: Path) -> str:
     """git commit of the MitoM checkout; for a plain copy the size and time of mito_nuc.py"""
-    r = subprocess.run(["git", "-C", str(mitom), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
-    if r.stdout.strip():
-        return r.stdout.strip()
+    commit = output(["git", "-C", mitom, "rev-parse", "--short", "HEAD"], check=False).strip()
+    if commit:
+        return commit
     f = Path(mitom) / "mito_nuc.py"
     return f"mito_nuc.py:{f.stat().st_size}:{int(f.stat().st_mtime)}" if f.exists() else "unknown"
 
@@ -237,12 +218,9 @@ def annotate(fasta, out, kind, sample, mitom, python=sys.executable, threads=4, 
     if not (old in (ver, ver.split(" ")[0]) and (out / "consensus.tsv").exists()):
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True)
-        env = dict(os.environ, PATH=f"{Path(python).parent}{os.pathsep}{os.environ['PATH']}")
         log(f"{sample}: MitoM {kind} on {Path(fasta).name} -> {out.parent.name}/{out.name}")
-        with open(out / "mitom_nuc.log", "w") as fh:
-            subprocess.run([str(python), str(mitom / "mitom"), "nuc", "annotate", "-i", str(fasta), "-o", str(out),
-                            "--genes", kind, "--threads", str(threads)], stdout=fh, stderr=subprocess.STDOUT,
-                           env=env, check=True)
+        run([python, mitom / "mitom", "nuc", "annotate", "-i", fasta, "-o", out, "--genes", kind, "--threads",
+             threads], out / "mitom_nuc.log", env=tool_env(python), check=True)
         stamp.write_text(ver + "\n")
     if gbf and (out / "nuc_annotation.gb").exists():
         shutil.copy(out / "nuc_annotation.gb", out / f"{sample}.{kind}.gbf")
@@ -313,10 +291,7 @@ def compare(sample, kind, go_dir, spades_dir):
 
 
 def write_rows(path, rows):
-    with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, COLS, delimiter="\t", restval="")
-        w.writeheader()
-        w.writerows(rows)
+    write_tsv(path, rows, COLS)
 
 
 # ── batch over an existing results directory ───────────────────────────────

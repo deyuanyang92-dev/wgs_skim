@@ -40,7 +40,7 @@ ERROR ~ Config parsing failed
 2. `modules/common.nf:102`：`def out = new StringBuilder(), err = new StringBuilder()`（一行声明两个变量）→ 拆成两行。
    其余 72 个 "`X` is not defined" 都是 common.nf 无法解析造成的连锁错误。
 
-结论：**在 Nextflow ≥ 26.04 上当前代码无法启动**。在修改前，`cli.py` 的 `run_nextflow` 应设置 `NXF_SYNTAX_PARSER=v1`
+结论：**在 Nextflow ≥ 26.04 上当前代码无法启动**。在修改前，`src/wgs_skim/engine.py` 的 `nextflow()` 应设置 `NXF_SYNTAX_PARSER=v1`
 （或 `manifest.nextflowVersion = '>=24.04.0, <26.04'`）；长期应修这两处让 v1/v2 都能解析。`nextflow self-update` 会直接踩到这个问题。
 
 ## 3. wgs_skim 中的调用
@@ -117,5 +117,5 @@ nextflow run <repo>/nextflow/main.nf -profile conda -resume -work-dir <outdir>/w
 - https://docs.seqera.io/nextflow/migrations/26-04 ；https://docs.seqera.io/nextflow/strict-syntax ；https://docs.seqera.io/nextflow/cache-and-resume
 - Issues：#5468 #5774 #6311 #6613 #6797 #7551 #7787
 - 本机实测：`NXF_SYNTAX_PARSER=v2 nextflow config`、`nextflow lint`（Nextflow 25.04.2）
-- 本项目：`nextflow/nextflow.config`、`nextflow/modules/common.nf`、`assembly.nf`、`src/wgs_skim/cli.py`（run_nextflow）、
+- 本项目：`nextflow/nextflow.config`、`nextflow/modules/common.nf`、`assembly.nf`、`src/wgs_skim/engine.py`（nextflow）、
   `docs/TESTING.md` §4 §10、`../wgs_skim_test/nf_e2e*.log`

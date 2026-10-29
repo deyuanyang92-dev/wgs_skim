@@ -13,7 +13,6 @@ over the GetOrganelle sequence). Rules, in order:
 Without a GetOrganelle result, scaffolds matching the MEANGS seed (>= 95%) are used the same way, linear or not.
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -21,7 +20,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules 
 if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
     sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
 from circularize import circularize  # noqa: E402
-from seqtools import read_fasta, write_fasta  # noqa: E402
+from runtools import aligned_bp, blastn  # noqa: E402
+from seqtools import iter_fasta, read_fasta, write_fasta  # noqa: E402
+
+
+def blast_hits(query, scaffolds, min_pid, threads=1):
+    """{scaffold: aligned query bp} for HSPs >= min_pid (through a BLAST database: genomes are too big for
+    -subject)"""
+    return aligned_bp(blastn(query, scaffolds, "sseqid pident length", 1e-20, threads, db=True), "sseqid", min_pid)
+
+
+def scaffold_seqs(path, ids):
+    """only the wanted scaffolds, streamed (the genome assembly does not need to fit in memory)"""
+    return {n: s for n, s in iter_fasta(path, first_word=True) if n in ids}
 
 
 def main(sm):
@@ -34,44 +45,12 @@ def main(sm):
     final, source, note = go, "getorganelle", ""
 
 
-    def blast_hits(query, scaffolds, min_pid):
-        """{scaffold: aligned query bp} for HSPs >= min_pid (a BLAST database: genomes are too big for -subject)."""
-        db = Path(sm.output.status).parent / "scaffolds_db"
-        subprocess.run(["makeblastdb", "-in", scaffolds, "-dbtype", "nucl", "-out", str(db)], check=True,
-                       stdout=sys.stderr, stderr=sys.stderr)
-        out = subprocess.run(["blastn", "-query", query, "-db", str(db), "-evalue", "1e-20", "-num_threads",
-                              str(sm.threads), "-outfmt", "6 sseqid pident length"], capture_output=True, text=True,
-                             check=True).stdout
-        for f in db.parent.glob("scaffolds_db.*"):
-            f.unlink()
-        cov = {}
-        for line in out.splitlines():
-            sid, pid, length = line.split("\t")
-            if float(pid) >= min_pid:
-                cov[sid] = cov.get(sid, 0) + int(length)
-        return cov
-
-
-    def scaffold_seqs(path, ids):
-        """Only the wanted scaffolds, streamed (the genome assembly does not need to fit in memory)."""
-        seqs, cur = {}, None
-        for line in open(path):
-            if line.startswith(">"):
-                cur = line[1:].split()[0]
-                cur = cur if cur in ids else None
-                if cur:
-                    seqs[cur] = []
-            elif cur:
-                seqs[cur].append(line.strip().upper())
-        return {k: "".join(v) for k, v in seqs.items()}
-
-
     scaffolds = sm.input.get("scaffolds")
     if not status["circular"] and scaffolds and Path(scaffolds).stat().st_size:
         query, min_pid = (sm.input.fasta, 98) if go else (sm.input.seed, 95)
         if Path(query).stat().st_size:
             qlen = go_len or sum(len(s) for _, s in read_fasta(query))
-            hits = blast_hits(query, scaffolds, min_pid)
+            hits = blast_hits(query, scaffolds, min_pid, sm.threads)
             need = 0.9 * qlen if go else 0.5 * qlen
             cand = {sid for sid, bp in hits.items() if bp >= need}
             seqs = scaffold_seqs(scaffolds, cand)
@@ -105,8 +84,7 @@ def main(sm):
                         f"GetOrganelle {go_len} bp" + (f"; repeat units {r['repeats']}" if r["repeats"] else ""))
             print(f"candidates {sorted(cand)}; chosen: {note or 'GetOrganelle'}", file=sys.stderr)
 
-    with open(sm.output.fasta, "w") as fh:
-        write_fasta(final, fh)
+    write_fasta(final, sm.output.fasta)
     status.update(source=source, getorganelle_length=go_len, length=sum(len(s) for _, s in final),
                   circular=status["circular"] or (source == "spades" and "circular" in final[0][0]), note=note)
     json.dump(status, open(sm.output.status, "w"), indent=1)

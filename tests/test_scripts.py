@@ -119,7 +119,7 @@ def test_split_point_follows_rotation_and_strand():
     ann = [(rot, [("nad5", nad5[0] - 700, nad5[1] - 700)])]
     g, m = topology.split_point(s, ann)
     assert g == "nad5" and m == (nad5[0] + nad5[1]) // 2
-    rev = rot.translate(topology.COMP)[::-1]         # the annotated record on the other strand: mirrored coordinates
+    rev = seqtools.rc(rot)         # the annotated record on the other strand: mirrored coordinates
     L = len(s)
     g, m2 = topology.split_point(s, [(rev, [("nad5", L - (nad5[1] - 700), L - (nad5[0] - 700))])])
     assert g == "nad5" and abs(m2 - m) <= 1
@@ -343,3 +343,92 @@ def test_mitofinder_check_contamination_vs_no_close_reference():
     assert v["A|COX2"].startswith("no close reference (best Drosophilidae")
     assert v["A|ATP6"].startswith("partial hit") and v["A|ND6"] == "no hit"
     assert mitofinder_check.family("Metazoa; Annelida; Nephtyidae; Nephtys") == "Nephtyidae"
+
+
+# ── shared modules: seqtools, tables, collect_fasta, runtools, mitofinder_run / prefilter ─────────────────
+def test_seqtools_shared_helpers(tmp_path):
+    assert seqtools.rc("ACGTNacgtRY") == "RYacgtNACGT"
+    assert seqtools.parse_fasta(">a x\nac\ngt\n\n>b\nAA\n") == [("a x", "ACGT"), ("b", "AA")]
+    seqtools.write_fasta([("a", "A" * 100), ("e", "")], tmp_path / "w.fa", width=0)
+    assert (tmp_path / "w.fa").read_text() == ">a\n" + "A" * 100 + "\n>e\n"
+    seqtools.write_fasta([("a", "A" * 100)], tmp_path / "w80.fa")
+    assert [len(x) for x in (tmp_path / "w80.fa").read_text().split()] == [2, 80, 20]
+    assert seqtools.is_circular("x|mt|1 circular length=5") and not seqtools.is_circular("x linear")
+    gb = tmp_path / "r.gb"
+    gb.write_text("LOCUS       R1   12 bp DNA circular\nFEATURES\nORIGIN\n        1 acgtacgtac gt\n//\n"
+                  "LOCUS       R2   4 bp\nORIGIN\n        1 aaaa\n//\n")
+    assert seqtools.genbank_seqs(gb) == [("R1", "ACGTACGTACGT"), ("R2", "AAAA")]
+
+
+def test_tables_roundtrip(tmp_path):
+    import tables
+    f = tables.write_tsv(tmp_path / "t.tsv", [{"a": 1, "b": "x", "extra": 9}, {"a": 2}], ["a", "b"])
+    assert f.read_text() == "a\tb\n1\tx\n2\t\n"
+    tables.write_tsv(f, [{"a": 3, "b": "y"}], ["a", "b"], append=True)
+    assert tables.read_tsv(f) == [{"a": "1", "b": "x"}, {"a": "2", "b": ""}, {"a": "3", "b": "y"}]
+    assert tables.read_tsv(tmp_path / "missing.tsv") == []
+
+
+def test_getorganelle_result_and_command(tmp_path):
+    d = tmp_path / "go"
+    d.mkdir()
+    for n in ("animal_mt.K115.scaffolds.graph1.1.path_sequence.fasta", "animal_mt.K115.complete.graph1.1.path_sequence.fasta",
+              "animal_mt.K115.complete.graph1.2.path_sequence.fasta"):
+        (d / n).write_text(">p (circular)\nACGT\n")
+    (d / "animal_mt.K115.complete.graph1.selected_graph.gfa").write_text("H\n")
+    fasta, gfa, n = collect_fasta.result(d)
+    assert fasta.name.startswith("animal_mt.K115.complete.graph1.1") and gfa.name.endswith("selected_graph.gfa")
+    assert n == 2 and collect_fasta.result(tmp_path / "none") == (None, None, 0)
+    assert collect_fasta.best(d) == ([("p (circular)", "ACGT")], True)
+    cmd = collect_fasta.getorganelle_cmd("r1", "r2", "out", "anonym", 4, seed="s.fa", rounds=10, max_reads=None,
+                                         genes="l.fa", extra=["-P", "0"])
+    assert cmd[:10] == ["get_organelle_from_reads.py", "-1", "r1", "-2", "r2", "-o", "out", "-F", "anonym", "-t"]
+    assert cmd[cmd.index("--max-reads") + 1] == "inf" and cmd[-2:] == ["-P", "0"]
+    assert "-k" not in cmd and cmd[cmd.index("-s") + 1] == "s.fa" and cmd[cmd.index("--genes") + 1] == "l.fa"
+
+
+def test_runtools_aligned_bp_and_run(tmp_path):
+    import runtools
+    hits = [{"sseqid": "a", "pident": "99.0", "length": "100"}, {"sseqid": "a", "pident": "90", "length": "50"},
+            {"sseqid": "b", "pident": "100", "length": "10"}]
+    assert runtools.aligned_bp(hits, min_pident=95) == {"a": 100, "b": 10}
+    assert runtools.run(["sh", "-c", "echo hi; exit 3"], tmp_path / "x.log") == 3
+    assert (tmp_path / "x.log").read_text() == "hi\n"
+    with pytest.raises(RuntimeError):
+        runtools.run(["false"], tmp_path / "y.log", check=True)
+
+
+def test_mitofinder_collect_no_contig(tmp_path):
+    """MitoFinder writes Final_Results even when it finds no mitochondrial contig (tools2: cwsc010) -> empty
+    outputs and 0, not a failed job"""
+    import mitofinder_run
+    final = tmp_path / "S_MitoFinder_mitfi_Final_Results"
+    final.mkdir()
+    assert mitofinder_run.collect(final, tmp_path, "S") == 0
+    assert (tmp_path / "S.mitofinder.fasta").read_text() == "" and (tmp_path / "S.mitofinder.gb").exists()
+    (final / "S_mtDNA_contig.fasta").write_text(">c\nACGT\n")
+    (final / "S_mtDNA_contig_genes_NT.fasta").write_text(">g\nAC\n")
+    (final / "S_mtDNA_contig.gb").write_text("LOCUS c\n//\n")
+    assert mitofinder_run.collect(final, tmp_path, "S") == 1
+    assert (tmp_path / "S.mitofinder.fasta").read_text() == ">c\nACGT\n"
+    assert mitofinder_run.mitofinder_exe("", []) == ["mitofinder"]
+    exe = mitofinder_run.mitofinder_exe("/x/mf.sif", [tmp_path, tmp_path])
+    assert exe[:3] == ["singularity", "exec", "--cleanenv"] and exe.count("-B") == 1 and exe[-1] == "mitofinder"
+
+
+def test_mitofinder_prefilter_coverage():
+    import mitofinder_prefilter as mp
+    assert mp.weighted_median([(100, 1.0), (100, 2.0), (1000, 50.0)]) == 50.0
+    assert mp.coverage("NODE_3_length_1500_cov_12.5") == 12.5 and mp.coverage("contig1") is None
+
+
+def test_every_script_imports_without_side_effects(tmp_path, monkeypatch):
+    """docs/DEVELOPING.md rule 1: importing a module runs nothing (no files written, no exit)"""
+    import importlib
+    monkeypatch.chdir(tmp_path)
+    scripts = HERE.parent / "workflow" / "scripts"
+    for p in sorted(scripts.glob("*.py")):
+        if p.stem == "build_marker_db" or p.stem.startswith("_"):
+            continue
+        importlib.import_module(p.stem)
+    assert list(tmp_path.iterdir()) == []

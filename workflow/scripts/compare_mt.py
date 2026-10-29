@@ -32,24 +32,21 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from circularize import circularize, rc  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from assembly_check import check, read_gff  # noqa: E402
+from circularize import circularize  # noqa: E402
+from collect_fasta import result  # noqa: E402
 from plot_compare import draw  # noqa: E402
-from seqtools import read_fasta, write_fasta  # noqa: E402
+from seqtools import parse_fasta, rc, read_fasta, write_fasta  # noqa: E402
+from tables import read_tsv, write_tsv  # noqa: E402
 
 
 def getorganelle_result(path):
     """(fasta, gfa or None, number of alternative paths) from a GetOrganelle output directory or a FASTA."""
-    p = Path(path)
-    if p.is_file():
-        return p, None, 1
-    for kind in ("complete", "scaffolds", "contigs"):
-        fs = sorted(p.glob(f"*.{kind}.graph1.*.path_sequence.fasta"))
-        if fs:
-            gfa = next(iter(p.glob(f"*.{kind}.graph1.selected_graph.gfa")), None)
-            return fs[0], gfa, len(fs)
-    sys.exit(f"no GetOrganelle path_sequence.fasta in {p}")
+    fasta, gfa, n = result(path)
+    if not fasta:
+        sys.exit(f"no GetOrganelle path_sequence.fasta in {path}")
+    return fasta, gfa, n
 
 
 def graph_regions(header, gfa, ref):
@@ -152,17 +149,7 @@ def mafft(a, b):
         fh.flush()
         res = subprocess.run(["mafft", "--auto", "--quiet", "--thread", "4", fh.name], capture_output=True, text=True,
                              check=True)
-    return [s for _, s in read_fasta_text(res.stdout)]
-
-
-def read_fasta_text(text):
-    recs = []
-    for line in text.splitlines():
-        if line.startswith(">"):
-            recs.append([line[1:], ""])
-        elif recs:
-            recs[-1][1] += line.strip().upper()
-    return recs
+    return [s for _, s in parse_fasta(res.stdout)]
 
 
 def diff_blocks(a, b, merge=10):
@@ -394,10 +381,7 @@ def compare_sample(ref_path, others, out, prefix, spades=None, gb=None, gfa=None
 def write_tables(out, prefix, summaries, diffs, structs, gene_rows):
     for name, fields, data in (("compare", SUMMARY, summaries), ("diffs", DIFFS, diffs),
                                ("structure", STRUCTURE, structs), ("genes", GENES, gene_rows)):
-        with open(out / f"{prefix}.{name}.tsv", "w", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t", extrasaction="ignore", restval="")
-            w.writeheader()
-            w.writerows(data)
+        write_tsv(out / f"{prefix}.{name}.tsv", data, fields)
 
 
 # Result layouts found by --results: paths relative to the results directory, {s} = sample. Every assembly found
@@ -467,8 +451,7 @@ def merge(out, samples, skipped=()):
     for smp in samples:
         for name in tables:
             f = out / f"{smp}.{name}.tsv"
-            if f.exists() and f.stat().st_size:
-                tables[name] += list(csv.DictReader(open(f), delimiter="\t"))
+            tables[name] += read_tsv(f)
     tables["compare"] += [{"sample": smp, "verdict": "skipped", "note": why} for smp, why in skipped]
     write_tables(out, "all", tables["compare"], tables["diffs"], tables["structure"], tables["genes"])
     overview(out, tables["compare"])

@@ -8,14 +8,15 @@ circular round, and when a round returns the same sequence as the round before: 
 rounds). The result is the first circular round, otherwise the last round that gave a result.
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the shared modules next to this script
 if "snakemake" in globals():                                  # a Snakemake script: run from a temporary copy
     sys.path.insert(0, snakemake.scriptdir)  # noqa: F821
-from collect_fasta import best, clean, renamed, write_fasta  # noqa: E402
+from collect_fasta import best, clean, getorganelle_cmd, renamed  # noqa: E402
+from runtools import run  # noqa: E402
+from seqtools import write_fasta  # noqa: E402
 
 
 def main(sm):
@@ -51,17 +52,13 @@ def main(sm):
             break
         prev = next((r for _, r, _ in reversed(rounds) if r), None)
         out = base / f"round{k}"
-        cmd = ["get_organelle_from_reads.py", "-1", sm.input.r1, "-2", sm.input.r2, "-o", str(out), "-F", "animal_mt",
-               "-R", str(p.R), "-k", str(p.k), "-t", str(sm.threads), "--config-dir", sm.input.db, "--overwrite",
-               "--max-reads", str(cap) if cap else "inf", "--reduce-reads-for-coverage", "inf"]
+        seed = base / f"round{k}.seed.fasta" if prev else None
         if prev:
-            seed = base / f"round{k}.seed.fasta"
-            with open(seed, "w") as fh:
-                write_fasta(prev, fh)
-            cmd += ["-s", str(seed)]
+            write_fasta(prev, seed)
+        cmd = getorganelle_cmd(sm.input.r1, sm.input.r2, out, "animal_mt", sm.threads, seed, p.R, p.k, cap,
+                               sm.input.db)
         log.write(f"round{k}: {' '.join(cmd)}\n")
-        log.flush()
-        rc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT).returncode
+        rc = run(cmd, log)
         recs, circ = best(out)
         log.write(f"round{k}: rc={rc}, {len(recs)} sequence(s), circular={circ}, {clean(out) / 1e6:.0f} MB of "
                   "intermediates removed\n")
@@ -70,8 +67,7 @@ def main(sm):
     chosen = next((r for r in rounds if r[2]), None) or next((r for r in reversed(rounds) if r[1]), None) \
         or ("none", [], False)
     name, recs, circ = chosen
-    with open(sm.output.fasta, "w") as fh:
-        write_fasta(renamed(recs, sample, "mt"), fh)
+    write_fasta(renamed(recs, sample, "mt"), sm.output.fasta)
     json.dump({"sample": sample, "circular": circ, "round": name, "rounds_run": len(rounds) - 1,
                "n_sequences": len(recs), "length": sum(len(s) for _, s in recs),
                "max_reads_per_file": cap, "stop": stop}, open(sm.output.status, "w"), indent=1)

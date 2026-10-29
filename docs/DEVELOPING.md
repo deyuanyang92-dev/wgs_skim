@@ -2,10 +2,16 @@
 
 wgs_skim 功能多，所以代码按"一处实现、到处复用"组织。新增功能前先看这里：要用的函数很可能已经有了。
 
-## 三层结构
+## 结构
 
 ```
-src/wgs_skim/cli.py          命令行：wgs_skim run / <工具> / compare / nuclear …，只负责把选项变成 Snakemake 配置
+src/wgs_skim/                Python 包（命令行与 Python 接口）
+  cli.py                     命令行：只解析参数，调用下面的模块
+  paths.py                   位置：workflow/、~/.wgs_skim、软件环境目录、机器内存
+  engine.py                  引擎：由一组工作流选项生成并运行 Snakemake / Nextflow 命令
+  tools.py                   工具登记表 TOOLS：每个工具的输入、步骤、专有选项及其配置（wgs_skim <工具>）
+  api.py                     Python 接口：wgs_skim.run(...)、wgs_skim.tool(...)、wgs_skim.command(...)
+  lib.py                     workflow/scripts 作为库：from wgs_skim.lib import seqtools
 workflow/Snakefile           include rules/*.smk
 workflow/rules/*.smk         每类工具一个规则文件：输入、输出、资源（threads、mem_mb）、conda 环境、命令
 workflow/scripts/*.py        真正的计算；每个脚本同时是：可 import 的模块 + 命令行工具 和 / 或 Snakemake 脚本
@@ -35,9 +41,13 @@ nextflow/                    同一流程的 Nextflow 版本，调用同一批 s
 
 | 模块 | 函数 | 用途 |
 |---|---|---|
-| `seqtools` | `iter_fasta(path, first_word, upper)`、`read_fasta`、`write_fasta`、`find_circle` | FASTA 读写（含 .gz、逐条读取大组装）、首尾重叠 |
-| `samples` | `find_pairs`、`read_sheet`、`sheet_columns`、`fasta_samples`、`split_fasta` | 样品识别：reads 目录、样品表、FASTA 输入（含按序列名拆分） |
-| `collect_fasta` | `result_fastas`、`best`、`clean`、`renamed` | GetOrganelle 结果选择与临时文件清理 |
+| `seqtools` | `iter_fasta(path, first_word, upper)`、`read_fasta`、`parse_fasta(text)`、`write_fasta(recs, 文件或路径, width)`、`rc`、`fasta_lengths`、`n50`、`is_circular(header)`、`genbank_seqs`、`find_circle` | 序列：FASTA 读写（含 .gz、逐条读取大组装）、反向互补、长度与 N50、GenBank 序列（不需 Biopython）、首尾重叠 |
+| `tables` | `write_tsv(path, rows, cols, append)`、`read_tsv` | 所有结果表的读写 |
+| `runtools` | `run(cmd, log, env, check, cwd)`、`sh`、`output`、`tool_env`、`blastn(query, target, fields, evalue, threads, db)`、`aligned_bp` | 运行外部程序（日志、环境）；BLAST（大目标自动建临时库） |
+| `samples` | `find_pairs`、`read_sheet`、`sheet_columns`、`fasta_samples`、`split_fasta`、`by_sample` | 样品识别：reads 目录、样品表、FASTA 输入（含按序列名拆分）、按样品目录取文件 |
+| `collect_fasta` | `getorganelle_cmd`、`result(path)`、`result_fasta`、`best`、`clean`、`renamed` | GetOrganelle：命令、结果选择（含组装图）、改名、临时文件清理 |
+| `mitofinder_run` | `run_mitofinder`、`collect`、`mitofinder_exe`、`first_pairs` | 一次 MitoFinder 运行（组装或 reads；Singularity 或 bioconda），只用标准库 |
+| `mitofinder_prefilter` | `select`、`ref_hits`、`weighted_median` | MitoFinder 输入：深覆盖 scaffold + 参考序列命中的 scaffold |
 | `circularize` | `circularize(recs, spades)`、`rc` | 无 reads 环化（组装图 / 重叠 / 拼接） |
 | `blast_taxonomy` | `blast_topn(query, out_tsv, db, topn, threads, email)`、`mt_genes`、`nr_regions` | BLAST + GenBank 物种分类（blast2metadata 的流程） |
 | `mitofinder_summary` | `sample_result` | MitoFinder 结果汇总 |
@@ -46,7 +56,11 @@ nextflow/                    同一流程的 Nextflow 版本，调用同一批 s
 | `assembly_check` | `check`、`read_gff` | QUAST 式结构比较 |
 | `summary` | `genomescope`、`genome_size_check`、`busco_line`、`n50` | 汇总表 |
 
-4. 每个新函数在 `tests/test_scripts.py` 有单元测试（秒级，不需要外部软件）；断言用真实数据中观察到的情况，注释写明来源。
+4. 外部程序用 `runtools.run`（日志、退出码）与 `runtools.blastn`，表格用 `tables`，FASTA 用 `seqtools`，
+   GetOrganelle 用 `collect_fasta`；不要在脚本里再写 `subprocess.run`、`csv.DictWriter`、FASTA 解析。
+   在旧工具环境（如 Python 2.7 的 bioconda MitoFinder）里运行的脚本只用标准库，并在规则中用 `{PY}`（Snakemake 的 Python 3）启动。
+
+5. 每个新函数在 `tests/test_scripts.py` 有单元测试（秒级，不需要外部软件）；断言用真实数据中观察到的情况，注释写明来源。
 
 ## 新增一个工具（例：X）
 
@@ -59,15 +73,27 @@ nextflow/                    同一流程的 Nextflow 版本，调用同一批 s
    - 输入可以来自其他工具时，用输入函数选择来源（参考 `rules/mitofinder.smk` 的 `mitofinder_sources`）。
 4. `config/config.yaml` + `workflow/schemas/config.schema.yaml`：新配置键（带注释与默认值）；
    `python docs/wiki/tools/config_page.py > docs/wiki/Configuration.md` 重新生成配置页。
-5. `src/wgs_skim/cli.py`：在 `TOOLS` 加一项，即得到 `wgs_skim x` 批量命令（reads 或 FASTA 输入、-j、--mem-gb、-n 都是共用的）；
-   专有选项在 `main()` 的工具循环中加，在 `cmd_tool()` 中转成配置。
+5. `src/wgs_skim/tools.py`：在 `TOOLS` 加一个 `Tool(name, inputs, help, step, column, options, configure)`，即得到
+   `wgs_skim x` 批量命令与 `wgs_skim.tool("x", ...)`（reads 或 FASTA 输入、-j、--mem-gb、-n 都是共用的）；
+   专有选项写在 `options(parser)`，它们怎样变成工作流配置写在 `configure(args, conf, use_fasta)`。
 6. 测试：
    - `tests/cli_matrix.sh`：`tool "tool x" <应出现的规则> -- x …`，组合用 `dry "combo …"`（干运行，1 分钟内）；
    - `tests/tools_e2e.sh`：一项真实运行检查（`check NAME "输出文件" 命令`）；
    - 结果写进 `docs/TESTING.md`。
 7. 文档：`docs/wiki/Tool-X.md`（做什么、命令、输入、输出、实测时间）、`Tools.md` 表格、`_Sidebar.md`；
    组合写进对应的 `Combo-*.md`；常见错误写进 `Troubleshooting.md`。
-8. Nextflow：暂不支持的步骤在 `cli.py` 的 `run_nextflow` 的 `snakemake_only` 中列出（直接提示，不会只跑一半）。
+8. Nextflow：暂不支持的步骤列在 `engine.py` 的 `NEXTFLOW_MISSING` 中（直接提示，不会只跑一半）。
+
+## 从 Python 使用
+
+```python
+import wgs_skim
+wgs_skim.run(reads_dir="rawdata/", outdir="res/", steps="spades-busco", cores=32)       # = wgs_skim run ...
+wgs_skim.tool("mitofinder", reads_dir="rnaseq/", ref="related.gb", assembler="rnaspades")
+from wgs_skim.lib import seqtools, samples                                             # 库函数
+pairs = samples.find_pairs("rawdata/")
+```
+关键字参数就是命令的选项名（`-` 换成 `_`），与命令行完全一致（`tests/test_package.py`）。
 
 ## 检查清单（提交前）
 

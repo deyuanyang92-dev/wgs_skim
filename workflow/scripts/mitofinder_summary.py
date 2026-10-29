@@ -17,7 +17,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from seqtools import read_fasta  # noqa: E402
+from seqtools import read_fasta, write_fasta  # noqa: E402
+from tables import write_tsv  # noqa: E402
 
 RRNA = {"rrnl", "rrns", "16s", "12s", "l-rrna", "s-rrna"}
 INFOS = {"initial_contig": r"Initial contig name\s*:\s*(.+)", "length": r"Length\s*:\s*([\d.]+)",
@@ -68,24 +69,19 @@ def main():
                                 str(len(r["genes"]) - rrna), str(rrna), str(r["trna"])]
                                + [str(max(map(len, r["genes"][g]))) if g in r["genes"] else "N" for g in genes])
                      + "\n")
-    with open(out.parent / "mitofinder_contigs.tsv", "w") as fh:
-        fh.write("sample\tcontig\tinitial_contig\tlength\tgc_pct\tcircularization\n")
-        for r in rows:
-            for i, info in enumerate(r["infos"], 1):
-                fh.write(f"{r['sample']}\t{i}\t{info['initial_contig']}\t{info['length']}\t{info['gc']}\t"
-                         f"{info['circularization']}\n")
+    write_tsv(out.parent / "mitofinder_contigs.tsv",
+              ({"sample": r["sample"], "contig": i, "gc_pct": info["gc"], **info}
+               for r in rows for i, info in enumerate(r["infos"], 1)),
+              ["sample", "contig", "initial_contig", "length", "gc_pct", "circularization"])
     gdir, cdir = out.parent / "genes", out.parent / "contigs"
     gdir.mkdir(exist_ok=True)
     cdir.mkdir(exist_ok=True)
     for g in genes:
-        with open(gdir / f"{g}.fasta", "w") as fh:
-            for r in rows:
-                for k, seq in enumerate(r["genes"].get(g, []), 1):
-                    fh.write(f">{r['sample']}{'' if k == 1 else f'_copy{k}'}\n{seq}\n")
+        write_fasta([(f"{r['sample']}{'' if k == 1 else f'_copy{k}'}", seq) for r in rows
+                     for k, seq in enumerate(r["genes"].get(g, []), 1)], gdir / f"{g}.fasta", width=0)
     for r in rows:
         if r["seqs"]:
-            with open(cdir / f"{r['sample']}_all_mt.fasta", "w") as fh:
-                fh.writelines(f">{n}\n{x}\n" for n, x in r["seqs"])
+            write_fasta(r["seqs"], cdir / f"{r['sample']}_all_mt.fasta", width=0)
             (cdir / f"{r['sample']}_mt_contigsID_list.txt").write_text(
                 "".join(re.sub(r"\(.*?\)", "", n).strip() + "\n" for n, _ in r["seqs"]))
     (out.parent / "README.txt").write_text(

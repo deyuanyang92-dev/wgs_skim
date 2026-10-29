@@ -3,7 +3,7 @@
 ## 1. 简介与用途
 
 wgs_skim 的默认引擎。`wgs_skim run` / `nuclear` / `compare` / `install` 都是拼好命令再调用 Snakemake
-（`src/wgs_skim/cli.py`）：`workflow/Snakefile`（主流程）、`workflow/nuclear_batch.smk`、`workflow/compare_batch.smk`。
+（`src/wgs_skim/engine.py`）：`workflow/Snakefile`（主流程）、`workflow/nuclear_batch.smk`、`workflow/compare_batch.smk`。
 每个规则声明 `threads` 与 `resources: mem_mb`，Snakemake 按 `--cores` 和 `--resources mem_mb` 调度；软件环境用
 `workflow/envs/*.yaml` 由 conda 建在共享的 `--conda-prefix` 下。
 
