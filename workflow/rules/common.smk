@@ -316,9 +316,9 @@ def tool_summaries():
     with_reads = [x for x in s if x not in NO_READS]
     if config["qc"] and with_reads:
         t["fastp"] = expand(rules.fastp.output.json, sample=with_reads)
+    if mt_own and ("meangs" in steps or (config["mito"] and config["meangs"])):     # MEANGS alone too
+        t["meangs"] = expand(rules.meangs.output.seed, sample=mt_own)
     if config["mito"] and mt_own:
-        if config["meangs"]:
-            t["meangs"] = expand(rules.meangs.output.seed, sample=mt_own)
         t["getorganelle"] = expand(rules.mt_iterate.output.status, sample=mt_own)
         t["mitogenome"] = expand(rules.mt_select.output.status, sample=mt_own)
     if config["assembly"]:
