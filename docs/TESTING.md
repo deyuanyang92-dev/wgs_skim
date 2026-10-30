@@ -267,3 +267,22 @@ trinity-mitofinder）、circularize、compare、完整流程、nuclear、样品�
 | bioconda MitoFinder 1.4.1 不能运行 / 0 个 tRNA | 包里缺 install.sh.ok、Mitofinder.config；tRNAscan-SE 找不到 lib/gcode | post-deploy 脚本补齐（9 / 19 个 tRNA） |
 
 用时（64 核 / 300 GB 每条线）：DNA 线约 4.5 h，RNA 线约 1.5 h；最慢的是完整流程（27 min）、Nextflow（24 min）、metaSPAdes（20 min）。
+
+### 11.1 Rerun with the per-tool output layout (2026-10-30)
+
+Output layout changed to the nf-core / Snakemake convention (`<tool>/<sample>/`, `<tool>/<tool>_summary.tsv`,
+`summary/`, `pipeline_info/`); reads are cleaned once (02 DNA, 30 RNA) and later functions read the clean reads
+where they are (`--no-qc`). Results on this machine: `wgs_skim_test/all_functions/` (README.md per function).
+
+36 functions (as in §11 plus 16 MitoFinder with 5 related references, 30 RNA QC): all run; 230 truth checks,
+221 agree. The 9 others: MitoFinder with one distant reference (13-15) misses ND2 / ND4L / rrnL in S3-S5; with 5
+related references (16) 15 / 15. Contamination: S5 RNA flagged COX1, CYTB (rnaSPAdes and Trinity), nothing else.
+
+Problems found in this round and fixed:
+| Problem | Cause | Change |
+|---|---|---|
+| rnaSPAdes: `path contains non-ASCII characters` | Chinese test directory names | test directories renamed; wgs_skim stops at start on non-ASCII results / input paths |
+| Nextflow: `Failed to publish ... Invalid cross-device link`; MitoM results inside `~/.wgs_skim/db/mitom/` | the MitoM database was staged as `mitom`, the same name as the new `mitom/` output folder | database inputs staged as `staged_db`; the 4 stray sample folders removed from the database |
+| `meangs/meangs_summary.tsv` missing when MEANGS runs alone | per-tool summary only with the mitogenome step | fixed |
+| 36: S5 contamination not flagged; 203 of 371 hits "(efetch failed)" | NCBI efetch dropped connections / HTTP 400 on 100-accession batches; hits without metadata counted as "no hit"; the placeholder matched itself | retries with backoff, failing batches split, metadata cache (`<db_dir>/genbank_metadata.tsv`); hits without metadata reported as such, sample marked incomplete, foreign copies flagged by accession |
+| personal defaults lost with a preset / `--configfile` | `--configfile` given twice; Snakemake keeps the last | one `--configfile A B` |
