@@ -223,3 +223,44 @@ Nextflow 25.04.2，本地 executor，`-profile conda`（直接复用 `wgs_skim i
 资源（`pipeline_info/trace_*.tsv`，峰值内存）：BLAST 47.5 GB（本地库映射入内存，与 Snakemake 相同），MT_ITERATE 6–10 GB，
 SPAdes 4.8 GB（申请 32 GB = `spades_min_mem_gb`），其余 < 7 GB。运行期间机器上还有其他任务（负载 50–110），总用时约 55 分钟（含修复后的续跑）。
 
+
+## 11. 全功能测试：5 个模拟样品（2026-10-30，`tests/sim/`、`tests/all_features.sh`）
+
+**数据**（`tests/sim/simulate.py`，真值已知）：MJ20260820041 的 5 个物种的线粒体（S1–S4 环状 15.3–17.2 kb，S5 *Pisione* 线状
+15.7 kb）、rDNA 单元（8.0–16.4 kb）、组蛋白簇（4.1–4.3 kb），加 20 Mb 核序列（CHY 组装的 scaffold，20×，0.2 % 杂合）；
+线粒体 300×，rDNA 2000×，组蛋白 1000×；每个样品约 1.4 M 对 2×150 bp。RNA：每个样品的 15 个线粒体基因（500×）+
+1 500 条真实转录本；S5 的 RNA 另加 *Nephtys*（EU293739，另一个科）的 COX1、CYTB（污染阳性对照）。
+
+```bash
+python tests/sim/simulate.py --sheet sim5/samples.tsv -o sim5 --rna-nuclear A1.rna.fasta \
+    --contaminant S5_Pisione:nephtys_mt.fasta:COX1,CYTB
+tests/all_features.sh sim5 sim5_features dna &  tests/all_features.sh sim5 sim5_features rna   # 两条线同时运行
+python tests/sim/check_truth.py sim5 sim5_features      # -> README.md（每个功能一行）、truth_check.md
+```
+每个功能一个目录（`NN_功能/`，内有 CHECK.md：命令、结果、看什么）。共 34 个功能：单工具（fastp、MEANGS、GetOrganelle
+mt / nr、SPAdes genome / meta、GenomeScope、BUSCO、MitoM、BLAST、MitoFinder 组装 / reads / bioconda / 多参考）、组合
+（meangs-getorganelle、spades-busco、spades-mitofinder、rnaspades-busco、trinity-busco、rnaspades-mitofinder、
+trinity-mitofinder）、circularize、compare、完整流程、nuclear、样品表（已有组装）、split-by-id、Python 接口、Nextflow；
+转录组：rnaSPAdes、Trinity、BUSCO transcriptome、`mitofinder --assembler rnaspades,trinity`。
+
+**结果**：34 个功能全部运行成功；与真值比较 275 项，266 项一致：
+- 线粒体（04 / 05 / 17 / 20 / 22 / 25）：5 个样品全部 100 % 覆盖、≥ 99.97 % 一致，S1–S4 环状、S5 线状，与真值相同。
+- rDNA、组蛋白、SPAdes 总长（~20 Mb）、GenomeScope 大小、MitoM（13 PCG / 2 rRNA / ≥ 20 tRNA）、BLAST：全部一致。
+- 污染检查：S5 RNA（rnaSPAdes 与 Trinity）报 `possible contamination: COX1, CYTB`，其余样品、S5 的 DNA 都不报。
+- 其余 9 项：MitoFinder 用**一个远缘参考**（S1 的注释）时，远缘的 S3–S5 只找到 12–13 / 15 个基因（缺 ND2、ND4L 或 rrnL）——
+  MitoFinder 的限制；同样数据用 5 个近缘种作参考（功能 26）：15 / 15。
+
+**测试中发现并已修正的问题**
+| 问题 | 原因 | 改动 |
+|---|---|---|
+| 模拟数据被当作 Phred+64（GetOrganelle 传给 SPAdes `--phred-offset 64`） | 第一版模拟的质量值全为 `F`，没有低于 `@` 的字符 | 模拟器生成真实的质量分布（测试数据问题，不是软件问题） |
+| GetOrganelle 自带种子无结果时又重复 3 轮（75 分钟） | 没有可以重新播种的序列，后续轮次与上一轮完全相同 | `mt_iterate.py`：无序列时不再重复 |
+| 转录本上 MitoFinder 只找到 0–5 个基因（S3–S5） | MitoFinder 用核苷酸 BLAST 逐条判断 contig；单基因转录本对远缘参考通不过 | 候选转录本（blastx + dc-megablast）以 N 隔开连成一条再交给 MitoFinder，基因映射回转录本：12–14 个 |
+| 连接后污染物的基因丢失 | MitoFinder 每条序列每个基因只注释一次 | MitoFinder 未注释的同基因转录本作为额外拷贝（`_copyN`）保留 |
+| S5 污染未被发现；S4 误报 | 多数投票让污染物成为样品的科；近缘属的 88.7 % 被当作同种 | 同一基因两个不同拷贝 = 两种生物；只在 ≥ 97 %（同种）时适用；候选拷贝不互相作证 |
+| `--split-by-id` 丢失 "circular" | 拆分时重写了序列名 | 保留描述；`>S1|mt|2` 的样品名取 `|` 之前 |
+| `compare --results` 读不了 wgs_skim 的结果目录 | 只认旧流程目录结构 | 新增 wgs_skim 结构 |
+| Trinity 失败：`unexpected argument '--minAssignedFrags'` | 重建的环境装上 salmon 2.x | 固定 salmon 1.10.3 |
+| bioconda MitoFinder 1.4.1 不能运行 / 0 个 tRNA | 包里缺 install.sh.ok、Mitofinder.config；tRNAscan-SE 找不到 lib/gcode | post-deploy 脚本补齐（9 / 19 个 tRNA） |
+
+用时（64 核 / 300 GB 每条线）：DNA 线约 4.5 h，RNA 线约 1.5 h；最慢的是完整流程（27 min）、Nextflow（24 min）、metaSPAdes（20 min）。
