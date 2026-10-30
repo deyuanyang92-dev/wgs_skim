@@ -1,0 +1,6 @@
+# mito: the mitogenome only - MEANGS seed -> GetOrganelle, reseeded with the previous round's result while not
+# circular, MitoM annotation, read-based circular / linear check, BLAST of cox1.
+#   wgs_skim run -r rawdata/ -o results/ --preset mito
+steps: "meangs-getorganelle,annotate,topology,blast,summary"
+mt_iter_rounds: 3        # reseeded rounds (0 = one GetOrganelle run)
+blast_nr: none

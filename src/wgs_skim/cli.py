@@ -28,7 +28,7 @@ from pathlib import Path
 
 from . import __version__
 from .engine import ascii_paths, base_cmd, execute, nextflow, snakemake
-from .paths import HOME, TAXA, default_conda_prefix, job_mem_gb, scripts_dir, workflow_root
+from .paths import HOME, TAXA, default_conda_prefix, job_mem_gb, preset_file, presets, scripts_dir, workflow_root
 from .tools import TOOLS, merged_ref, tool_config
 
 # the modules behind the commands: paths (where things are), engine (Snakemake / Nextflow command), tools (the
@@ -36,7 +36,7 @@ from .tools import TOOLS, merged_ref, tool_config
 
 
 def cmd_run(args, passthrough):
-    if not (args.reads_dir or args.samples or args.configfile):
+    if not (args.reads_dir or args.samples or args.configfile or args.preset):
         sys.exit("[wgs_skim] give the reads directory: wgs_skim run -r /path/to/rawdata")
     reads = Path(args.reads_dir).resolve() if args.reads_dir else None
     out = Path(args.outdir or (reads.parent / "wgs_skim_results" if reads else "wgs_skim_results")).resolve()
@@ -47,9 +47,27 @@ def cmd_run(args, passthrough):
             "mitofinder_ref": merged_ref(args.mitofinder_ref, out) if args.mitofinder_ref else None}
     if args.no_qc:                                    # the reads are already clean (e.g. fastp/ of an earlier run)
         conf["qc"] = False
+    if args.mt_rounds is not None:
+        conf["mt_iter_rounds"] = args.mt_rounds
+    files = ([preset_file(args.preset)] if args.preset else []) + ([args.configfile] if args.configfile else [])
     run = nextflow if args.engine == "nextflow" else snakemake
-    return run(conf, out, args.cores, job_mem_gb(args.mem_gb), args.conda_prefix, args.configfile, args.config,
+    return run(conf, out, args.cores, job_mem_gb(args.mem_gb), args.conda_prefix, files, args.config,
                args.dry_run, passthrough)
+
+
+def cmd_gui(args, passthrough):
+    from .gui import serve
+    return serve(args.port, not args.no_browser)
+
+
+def cmd_presets(args, passthrough):
+    """the presets: name, file, first comment line (what it runs)"""
+    for name, f in presets().items():
+        first = next((x.lstrip("# ").strip() for x in f.read_text().splitlines() if x.startswith("#")), "")
+        print(f"{name:16s} {first}\n{'':16s} {f}")
+    print(f"\nyour own: {HOME / 'presets'}/<name>.yaml (any workflow options, see `wgs_skim config`); "
+          "use: wgs_skim run -r rawdata/ --preset <name>")
+    return 0
 
 
 def cmd_tool(args, passthrough):
@@ -213,6 +231,11 @@ def parser():
     r.add_argument("--blast-nr", metavar="Q[,Q]",
                    help="rDNA BLAST queries: full and/or 18S, ITS, ITS1, 5.8S, ITS2, 28S (default 18S,ITS,28S)")
     r.add_argument("--email", help="e-mail for NCBI Entrez (BLAST metadata)")
+    r.add_argument("--preset", metavar="NAME|FILE", help="a set of steps and options: full (everything incl. "
+                   "SPAdes-MitoFinder), mito, nuclear, genome, transcriptome, or your own ~/.wgs_skim/presets/NAME.yaml "
+                   "(`wgs_skim presets` lists them); --steps / --config on the command line still win")
+    r.add_argument("--mt-rounds", type=int, metavar="N", help="GetOrganelle rounds reseeded with the previous "
+                   "result while the mitogenome is not circular (default 3; 0 = one run)")
     r.add_argument("--no-qc", action="store_true", help="the reads are already clean (e.g. the fastp/ directory of an "
                    "earlier run): used as they are, no fastp, no copies")
     r.add_argument("--busco-lineage", help="BUSCO lineage name or downloaded lineage directory")
@@ -305,6 +328,14 @@ def parser():
     b.add_argument("--taxid", type=int, default=33208, help="taxon to keep (default 33208 = Metazoa)")
     b.add_argument("--max-length", type=int, default=50000, help="longest record kept (default 50000 bp)")
     b.set_defaults(func=cmd_build_blastdb)
+
+    pr = sub.add_parser("presets", help="list the presets (wgs_skim run --preset NAME)")
+    pr.set_defaults(func=cmd_presets)
+
+    g = sub.add_parser("gui", help="tick functions and options in a web page, save them as a preset")
+    g.add_argument("--port", type=int, default=8765)
+    g.add_argument("--no-browser", action="store_true", help="only print the address")
+    g.set_defaults(func=cmd_gui)
 
     c = sub.add_parser("config", help="print the default configuration with comments")
     c.set_defaults(func=cmd_config)

@@ -1,0 +1,3 @@
+# genome: whole-genome survey - QC, SPAdes, BUSCO, genome size and heterozygosity (GenomeScope).
+#   wgs_skim run -r rawdata/ -o results/ --preset genome
+steps: "fastp-spades-busco,genome_size,summary"

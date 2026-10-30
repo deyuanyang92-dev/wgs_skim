@@ -28,6 +28,6 @@ packages = ["wgs_skim", "wgs_skim.workflow", "wgs_skim.config", "wgs_skim.resour
 
 [tool.setuptools.package-data]
 "wgs_skim.workflow" = ["Snakefile", "rules/*.smk", "envs/*.yaml", "envs/*.sh", "scripts/*.py", "schemas/*.yaml", "profiles/default/*.yaml"]
-"wgs_skim.config" = ["*.yaml", "*.md"]
+"wgs_skim.config" = ["*.yaml", "*.md", "presets/*.yaml"]
 "wgs_skim.resources" = ["*.fasta", "rdna/*.fasta", "histone/*.fasta"]
 "wgs_skim.nextflow" = ["main.nf", "nextflow.config", "modules/*.nf", "bin/*.py"]

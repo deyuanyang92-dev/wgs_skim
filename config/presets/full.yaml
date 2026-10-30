@@ -1,0 +1,7 @@
+# full: everything from raw reads in one run - QC, mitogenome (MEANGS + GetOrganelle, reseeded while not circular),
+# nuclear rDNA (18S-ITS-28S) and histones, SPAdes + BUSCO, genome size, SPAdes-MitoFinder, MitoM annotation,
+# read-based topology check, BLAST species check, summary report (summary/report.html).
+#   wgs_skim run -r rawdata/ -o results/ --preset full
+steps: ""                # every step
+mitofinder: true         # + MitoFinder on the SPAdes assembly (reference: each sample's own MitoM annotation)
+mt_iter_rounds: 3        # GetOrganelle reseeded with the previous result while not circular (0 = one run)

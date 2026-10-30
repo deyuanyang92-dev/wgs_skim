@@ -3,6 +3,7 @@
 - [首页](Home.md)
 - [安装](Installation.md)
 - [快速开始](Quick-start.md)
+- [Usage: commands, Snakemake, Nextflow, presets, GUI](Usage.md)
 - [输入数据](Input.md)
 
 **一、单个工具**（单独、批量运行）

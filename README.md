@@ -17,6 +17,10 @@ raw reads ─ fastp ─┬─ MEANGS seed ─ GetOrganelle mitogenome ─ not ci
 
 **详细中文使用手册（每个功能的命令、实测时间与内存、输出、报错排查）：[docs/wiki](docs/wiki/README.md)**
 
+**Usage - every function from the command, Snakemake or Nextflow; presets for your own habits; `wgs_skim gui` to
+tick functions in a web page: [docs/wiki/Usage.md](docs/wiki/Usage.md)**. Everything from raw data in one run:
+`wgs_skim run -r rawdata/ -o results/ --preset full`.
+
 
 ```bash
 # 1. 安装（一次）

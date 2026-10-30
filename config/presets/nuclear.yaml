@@ -1,0 +1,6 @@
+# nuclear: multi-copy nuclear markers only - rDNA unit (18S-ITS1-5.8S-ITS2-28S) and histone cluster (H1-H4) with
+# GetOrganelle (5 Gb, then 10 Gb seeded with round 1 when the unit does not close), MitoM annotation (.gbf),
+# BLAST of 18S / ITS / 28S.
+#   wgs_skim run -r rawdata/ -o results/ --preset nuclear
+steps: "nr,blast,summary"
+blast_mt: none

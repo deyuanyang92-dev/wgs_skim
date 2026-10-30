@@ -1,0 +1,4 @@
+# transcriptome: RNA-seq - QC, rnaSPAdes + BUSCO (transcriptome mode), mitochondrial genes from the transcripts with
+# MitoFinder, gene tables of all samples and the BLAST contamination check. Give related reference mitogenomes:
+#   wgs_skim run -r rnaseq/ -o results/ --preset transcriptome --mitofinder-ref refs_dir/
+steps: "rnaspades-busco,rnaspades-mitofinder"

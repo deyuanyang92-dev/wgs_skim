@@ -28,6 +28,25 @@ def workflow_root():
     sys.exit("[wgs_skim] cannot find workflow/Snakefile (broken installation?)")
 
 
+def presets():
+    """{name: preset file}: the built-in ones (config/presets) and the user's (~/.wgs_skim/presets, which win)"""
+    found = {}
+    for d in (workflow_root() / "config" / "presets", HOME / "presets"):
+        found |= {p.stem: p for p in sorted(Path(d).glob("*.yaml"))} if Path(d).is_dir() else {}
+    return found
+
+
+def preset_file(name):
+    """a preset by name, or a YAML file path"""
+    if Path(name).is_file():
+        return Path(name).resolve()
+    known = presets()
+    if name not in known:
+        sys.exit(f"[wgs_skim] unknown preset '{name}': {', '.join(known)} (or a YAML file; your own presets go in "
+                 f"{HOME / 'presets'}/<name>.yaml)")
+    return known[name]
+
+
 def scripts_dir():
     """workflow/scripts: the library every rule uses (see wgs_skim.lib)"""
     return workflow_root() / "workflow" / "scripts"

@@ -22,6 +22,7 @@
 | `Directory cannot be locked` / `IncompleteFilesException` | 上次运行被中断 | `wgs_skim run ... -- --unlock`，再运行同一条命令（不完整的文件会重做） |
 | `CreateCondaEnvironmentException`，`wgs_skim install` 中止 | 建环境时网络 / 频道问题 | 再运行 `wgs_skim install`（已建好的环境保留）；`--conda-prefix` 放到剩余 > 20 GB 的磁盘 |
 | `unknown step 'x'` / `unknown SPAdes mode 'x'` | 拼写错误 | 信息中列出全部可用值 |
+| Personal defaults (`~/.wgs_skim/config.yaml`: BUSCO lineage, BLAST database ...) ignored when `--configfile` / a preset is used | wgs_skim <= 0.1 passed `--configfile` twice; Snakemake keeps only the last | fixed (one `--configfile A B`); with Snakemake directly give all files after one `--configfile` |
 | `paths must contain only ASCII characters` | 结果目录或输入路径含中文等非 ASCII 字符；SPAdes 会拒绝（`path contains non-ASCII characters`），wgs_skim 在开始前就检查 | 用英文 / 拼音命名目录，如 `results_2026` |
 | Trinity：`unexpected argument '--minAssignedFrags'` | 环境里是 salmon 2.x，Trinity 2.15.2 需要 1.x | 已固定 `salmon =1.10.3`；旧环境删掉后重建（`wgs_skim install`） |
 | MitoFinder：`MitoFinder is not installed ... Aborting` | bioconda 1.4.1 环境缺 `install.sh.ok` | 用默认的 1.4.2 镜像（`mitofinder_sif`）；wgs_skim 把它报为失败，不当作"没找到" |

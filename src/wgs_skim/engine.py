@@ -24,8 +24,9 @@ def snakemake_exe():
 
 
 def user_files(configfile=None):
-    """~/.wgs_skim/config.yaml and the --configfile, those that exist"""
-    return [Path(f) for f in [USER_CONFIG] + ([configfile] if configfile else []) if Path(f).is_file()]
+    """~/.wgs_skim/config.yaml, then the preset and --configfile (one path or a list, later ones win)"""
+    extra = [configfile] if isinstance(configfile, (str, Path)) else list(configfile or [])
+    return [Path(f) for f in [USER_CONFIG] + extra if Path(f).is_file()]
 
 
 def user_config(configfile=None):
@@ -48,8 +49,9 @@ def base_cmd(conf, conda_prefix, configfile=None, config=(), snakefile="Snakefil
     """snakemake -s workflow/<snakefile> --sdm conda ... --configfile ... --config ..."""
     cmd = [snakemake_exe(), "-s", str(workflow_root() / "workflow" / snakefile),
            "--sdm", "conda", "--conda-prefix", str(conda_prefix)]
-    for f in user_files(configfile) if snakefile == "Snakefile" else []:
-        cmd += ["--configfile", str(f.resolve())]
+    files = [str(f.resolve()) for f in user_files(configfile)] if snakefile == "Snakefile" else []
+    if files:                     # one option, several files (a repeated --configfile keeps only the last one)
+        cmd += ["--configfile", *files]
     cfg = config_args(conf, configfile, config) if snakefile == "Snakefile" else \
         [f"{k}={v}" for k, v in conf.items() if v not in (None, "")]
     return cmd + (["--config", *cfg] if cfg else [])
