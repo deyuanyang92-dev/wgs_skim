@@ -513,24 +513,34 @@ An rDNA assembly the results directory already has counts as round 1.
 
 ## Output
 
+One directory per tool, one sub-directory per sample, the tool's summary table next to them (the layout of
+nf-core and Snakemake community pipelines); every tool together in `summary/`; logs and run records in
+`pipeline_info/`. A single tool (`wgs_skim busco ...`) gives only its own directory and `pipeline_info/`.
+
 ```
 wgs_skim_results/
-├── summary/samples.tsv        one row per sample: clean data, mitogenome length / circular / round, genes,
-│   summary/report.html        rDNA length, topology verdicts, SPAdes N50, BUSCO, genome size, heterozygosity, top BLAST hits
-├── qc/<sample>/               clean reads, fastp.html / fastp.json
-├── mitogenome/<sample>/<sample>.mt.fasta   final mitogenome (+ .mt.json: source, circular, why iteration stopped); round0..N
-├── rdna/<sample>/<sample>.nr.fasta   18S-ITS-28S (+ .rdna.gbf / .nr_features.tsv: 18S ITS1 5.8S ITS2 28S, mitom nuc)
-├── histone/<sample>/<sample>.histone.fasta   histone cluster (+ .histone.gbf: H1 H2A H2B H3 H4, mitom nuc)
-├── mitom/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
+├── fastp/<sample>/            clean reads, fastp.html / .json          fastp/fastp_summary.tsv
+├── meangs/<sample>/           MEANGS seed                               meangs/meangs_summary.tsv
+├── getorganelle/<sample>/     GetOrganelle rounds (round0..N), chosen round   getorganelle/getorganelle_summary.tsv
+├── mitogenome/<sample>/       final mitogenome <sample>.mt.fasta + .mt.json   mitogenome/mitogenome_summary.tsv
+├── mitom/<sample>/            MitoM annotation <sample>.mt.gb           mitom/mitom_summary.tsv
 ├── topology/<sample>/         read-based circular / linear check, end diagnosis
-├── nuclear_markers/<sample>/          rDNA + histone copies in SPAdes, consensus, copy_number.tsv, nuc_compare.tsv
-├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary; other SPAdes modes <sample>.<mode>.fasta,
-│                              Trinity <sample>.trinity.fasta, each with <sample>.<mode>.busco.txt
-├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
-├── blast/blast_topn.tsv       COX1 / rDNA top hits with GenBank organism and taxonomy
-└── logs/  benchmarks/         one log and one runtime/memory record per job, in directories named by rule
-                               (logs/mitom, logs/getorganelle_mt + mt_iterate + mt_select, logs/getorganelle_nr ...)
+├── rdna/<sample>/             18S-ITS-28S unit + .rdna.gbf              rdna/rdna_summary.tsv
+├── histone/<sample>/          histone cluster + .histone.gbf            histone/histone_summary.tsv
+├── nuclear_markers/<sample>/  rDNA + histone copies in SPAdes, copy numbers, vs GetOrganelle
+├── spades/<sample>/           <sample>.scaffolds.fasta, <sample>.<mode>.fasta   spades/spades_summary.tsv
+├── trinity/<sample>/          <sample>.trinity.fasta                    trinity/trinity_summary.tsv
+├── busco/<sample>/            <sample>.busco.txt, <sample>.<assembly>.busco.txt   busco/busco_summary.tsv
+├── genomescope/<sample>/      k-mer histogram, GenomeScope2             genomescope/genomescope_summary.tsv
+├── mitofinder_<source>/       <sample>/, mitofinder_summary.tsv (gene table), genes/, contigs/, contamination/
+├── blast/blast_topn.tsv       top hits with GenBank organism and taxonomy
+├── summary/                   samples.tsv (one row per sample, every tool), report.html
+└── pipeline_info/             logs/, benchmarks/ (time, memory), config_<time>.yaml (all parameters used),
+                               run_<time>.txt (command, versions), read_stats/, inputs/
 ```
+
+QC runs once: later steps read the clean reads in `fastp/<sample>/`. Reads that are already clean (e.g. `fastp/` of
+an earlier run): `wgs_skim run --no-qc` or a single tool (no QC by default) reads them where they are.
 
 ### From the earlier scripts (Temp_scripts)
 

@@ -58,7 +58,7 @@ wgs_skim nuclear --status -o nuclear/       # 核基因批量：每个样品每�
 |---|---|
 | 中断（关机、kill、内存不足） | 运行同一条命令；未完成的文件会重做（`rerun-incomplete`） |
 | `Directory cannot be locked` | `wgs_skim run ... -- --unlock`，再运行同一条命令 |
-| 某个样品失败 | 其他样品继续（`keep-going`）；看 `logs/`，修正后运行同一条命令 |
+| 某个样品失败 | 其他样品继续（`keep-going`）；看 `pipeline_info/logs/`，修正后运行同一条命令 |
 | 重做某一步 | `wgs_skim run ... -- --forcerun mt_iterate` |
 | 只跑到某一步 | `wgs_skim run ... -- --until busco` |
 | 改了参数但不想重跑 | `wgs_skim run ... -- --rerun-triggers mtime` |

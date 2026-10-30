@@ -57,10 +57,10 @@ nuclear/
 ├── summary.tsv                    每个样品 x 每个基因：两种方法的长度、是否不完整、组蛋白类别、错配、插入缺失、一致度、结论
 ├── rdna/ histone/
 │   ├── getorganelle/<s>/          组装结果、组装图、rounds.tsv
-│   └── mitom/<s>/            <s>.rdna.gbf / <s>.histone.gbf、nuc_features.tsv、consensus/、genes/、submission/（NCBI）
+│   └── annotation/<s>/            <s>.rdna.gbf / <s>.histone.gbf、nuc_features.tsv、consensus/、genes/、submission/（NCBI）
 ├── spades_mitom/<s>/              MitoM 在 SPAdes 组装上的结果（两种标记一次完成）
 ├── compare/<s>.tsv                每个样品的比较
-└── logs/ benchmarks/              每个任务的日志、时间、内存
+└── pipeline_info/logs/ benchmarks/   每个任务的日志、时间、内存
 ```
 
 `summary.tsv` 的结论：`identical` 相同；`contained` 较短（不完整）的一条完全包含在另一条中；`differ` 有差异（组蛋白不同拷贝之间可能有少量差异）；
