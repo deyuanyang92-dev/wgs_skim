@@ -3,7 +3,7 @@
 #   tests/all_features.sh SIM_DIR OUT_DIR [dna|rna|all]
 # SIM_DIR: simulate.py output (dna/, rna/, truth/, truth.tsv). OUT_DIR/NN_<function>/ holds that function's results
 # exactly as wgs_skim writes them (<tool>/<sample>/ + <tool>/<tool>_summary.tsv, pipeline_info/);
-# OUT_DIR/features.<lane>.tsv lists the runs. Then tests/sim/check_truth.py and tests/sim/report.py (说明.md).
+# OUT_DIR/features.<lane>.tsv lists the runs. Then tests/sim/check_truth.py and tests/sim/report.py (README.md).
 # The DNA and RNA functions are two lanes (run them at the same time: one call with dna, one with rna).
 # ONLY="13 36" reruns just these functions (their directories are replaced; the other directories are inputs).
 # Then: python tests/sim/check_truth.py SIM_DIR OUT_DIR  (assemblies against the truth -> OUT_DIR/truth_check.tsv)

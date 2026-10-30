@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .engine import base_cmd, execute, nextflow, snakemake
+from .engine import ascii_paths, base_cmd, execute, nextflow, snakemake
 from .paths import HOME, TAXA, default_conda_prefix, job_mem_gb, scripts_dir, workflow_root
 from .tools import TOOLS, merged_ref, tool_config
 
@@ -54,6 +54,7 @@ def cmd_run(args, passthrough):
 
 def cmd_tool(args, passthrough):
     out = Path(args.outdir or f"{args.tool}_results").resolve()
+    ascii_paths(out, {"reads_dir": args.reads_dir, "samples": args.samples} if hasattr(args, "reads_dir") else {})
     out.mkdir(parents=True, exist_ok=True)
     conf, _ = tool_config(args, out)
     return snakemake(conf, out, args.cores, job_mem_gb(args.mem_gb), args.conda_prefix, args.configfile,

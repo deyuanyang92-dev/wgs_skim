@@ -1,8 +1,8 @@
-"""说明.md in every function directory of tests/all_features.sh, and README.md above them.
+"""README.md in every function directory of tests/all_features.sh, and README.md above them.
 
     report.py SIM_DIR OUT_DIR          (after tests/sim/check_truth.py)
 Each function directory is wgs_skim's own output (<tool>/<sample>/, <tool>/<tool>_summary.tsv, pipeline_info/);
-说明.md says what the function does, the command, its directory layout, every sample's result against the truth
+README.md says what the function does, the command, its directory layout, every sample's result against the truth
 and the verdict."""
 import json
 import re
@@ -15,7 +15,7 @@ from check_truth import covered  # noqa: E402
 from seqtools import fasta_lengths, n50  # noqa: E402
 from tables import read_tsv  # noqa: E402
 
-# what each tool directory holds (the 目录 section of 说明.md)
+# what each tool directory holds (the 目录 section of README.md)
 DIRS = {
     "fastp": "clean reads 与质控报告；fastp_summary.tsv = 每个样品的数据量、Q30",
     "meangs": "MEANGS 线粒体种子；meangs_summary.tsv",
@@ -106,7 +106,7 @@ def main():
     index = ["# wgs_skim 全功能测试（5 个模拟样品）", "",
              f"模拟数据与真值：`{sim}`（truth.tsv）。每个功能一个目录，目录里就是 wgs_skim 的输出："
              "`<工具>/<样品>/`、`<工具>/<工具>_summary.tsv`（汇总）、`pipeline_info/`（日志、配置）。"
-             "每个目录的 `说明.md`：做什么、命令、目录、每个样品与真值的对比、结论。clean reads 只做一次"
+             "每个目录的 `README.md`：做什么、命令、目录、每个样品与真值的对比、结论。clean reads 只做一次"
              "（02 DNA、30 RNA），其后的功能直接读取它们。", "",
              "结果中的英文词：consistent = 各基因属同一科，no close reference = 数据库里没有近缘种（不是错误），"
              "possible contamination = 可能污染，partial hit = 只命中基因的一部分，circular / linear = 环状 / 线状，"
@@ -121,7 +121,7 @@ def main():
         md = [f"# {fn}", "", f"**做什么 / 看什么**：{run.get('what', '')}", "",
               f"**运行**：{'成功' if ran else '失败 ' + run.get('missing', '')}，{run.get('seconds', '?')} 秒", "",
               "**命令**：", "```bash", run.get("command", ""), "```", "", "## 目录", ""]
-        md += [f"- {dir_line(p)}" for p in sorted(d.iterdir()) if p.name != "说明.md"]
+        md += [f"- {dir_line(p)}" for p in sorted(d.iterdir()) if p.name != "README.md"]
         md += ["", "## 每个样品的结果", "", "| 样品 | 项目 | 结果 | 真值 | 一致 |", "|---|---|---|---|---|"]
         md += [f"| {r['sample']} | {r['item']} | {r['result']} | {r['truth']} | "
                f"{'是' if r['verdict'] == 'ok' else '**否**'} |" for r in rows]
@@ -132,11 +132,11 @@ def main():
             if "mitofinder" in fn and any("MitoFinder" in r["item"] for r in bad):
                 md.append("MitoFinder 只用一个远缘参考时，远缘样品 S3–S5 会漏掉 ND2、ND4L、rrnL；同样数据用 5 个近缘参考"
                           "（16）时 15 / 15。这是 MitoFinder 的限制，不是流程错误。")
-        (d / "说明.md").write_text("\n".join(md) + "\n")
+        (d / "README.md").write_text("\n".join(md) + "\n")
         tc = f"{len(rows) - len(bad)}/{len(rows)}" if rows else "（无真值项，见说明）"
-        index.append(f"| [{fn}]({fn}/说明.md) | {'成功' if ran else '失败'} | {tc} | {verdict} |")
+        index.append(f"| [{fn}]({fn}/README.md) | {'成功' if ran else '失败'} | {tc} | {verdict} |")
     (out / "README.md").write_text("\n".join(index) + "\n")
-    print(f"说明.md in every function directory; index -> {out / 'README.md'}")
+    print(f"README.md in every function directory; index -> {out / 'README.md'}")
 
 
 if __name__ == "__main__":

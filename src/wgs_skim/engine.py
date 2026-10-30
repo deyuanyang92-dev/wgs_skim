@@ -60,6 +60,17 @@ def resources(cores, mem_gb):
     return ["--cores", str(cores)] + (["--resources", f"mem_mb={int(mem_gb * 1024)}"] if mem_gb else [])
 
 
+def ascii_paths(out, conf):
+    """stop early on a non-ASCII results / input path: SPAdes refuses them ('path contains non-ASCII characters',
+    found with a Chinese results directory name, 2026-10-30) and other tools may break silently"""
+    paths = [("results directory", out)] + [(k, v) for k, v in conf.items()
+                                            if k in ("reads_dir", "samples", "mitofinder_ref") and v]
+    bad = [(k, str(v)) for k, v in paths if not str(v).isascii()]
+    if bad:
+        sys.exit("[wgs_skim] paths must contain only ASCII characters (SPAdes and other tools refuse others): "
+                 + "; ".join(f"{k} {v}" for k, v in bad) + " - use an English / pinyin name, e.g. results_2026")
+
+
 def execute(cmd, cwd=None, env=None, show=None):
     print((f"[wgs_skim] results: {show}\n" if show else "") + f"[wgs_skim] {shlex.join(map(str, cmd))}", flush=True)
     return subprocess.run([str(c) for c in cmd], cwd=cwd, env=env).returncode
@@ -70,6 +81,7 @@ def snakemake(conf, out, cores, mem_gb=0, conda_prefix=None, configfile=None, co
     """snakemake on workflow/<snakefile> with results in `out`, scheduled by cores and memory (GB); exit code"""
     from .paths import default_conda_prefix
     out = Path(out).resolve()
+    ascii_paths(out, conf)
     out.mkdir(parents=True, exist_ok=True)
     cmd = base_cmd(conf, conda_prefix or default_conda_prefix(), configfile, config, snakefile)
     cmd += ["-d", str(out)] + resources(cores, mem_gb) + (["-n"] if dry_run else []) + list(passthrough)
@@ -97,6 +109,7 @@ def nextflow(conf, out, cores, mem_gb=0, conda_prefix=None, configfile=None, con
                  "(drop --engine nextflow)")
     conda_prefix = conda_prefix or default_conda_prefix()
     out = Path(out).resolve()
+    ascii_paths(out, conf)
     out.mkdir(parents=True, exist_ok=True)
     params = user_config(configfile)
     params_file = out / "nextflow_params.yaml"
