@@ -120,8 +120,8 @@ def main():
     write_tsv(out / "truth_check.tsv", rows, COLS)
     bad = [r for r in rows if r["verdict"] != "ok"]
     with open(out / "truth_check.md", "w") as fh:
-        fh.write(f"# 与真值比较：{len(rows)} 项，{len(rows) - len(bad)} ok，{len(bad)} 需要检查\n\n")
-        fh.write("| 功能 | 样品 | 项目 | 结果 | 真值 | 判断 | 备注 |\n|---|---|---|---|---|---|---|\n")
+        fh.write(f"# Against the truth: {len(rows)} checks, {len(rows) - len(bad)} ok, {len(bad)} to check\n\n")
+        fh.write("| Function | Sample | Item | Result | Truth | Verdict | Note |\n|---|---|---|---|---|---|---|\n")
         for r in rows:
             fh.write("| " + " | ".join(str(r[c]).replace("|", "/") for c in COLS) + " |\n")
     print(f"{len(rows)} checks, {len(bad)} to check -> {out / 'truth_check.md'}")

@@ -329,17 +329,18 @@ def layout(results):
     sys.exit(f"[nuclear] {res}: no known results layout ({', '.join(LAYOUTS)})")
 
 
-README = """多拷贝核基因：rDNA（18S-ITS1-5.8S-ITS2-28S）与组蛋白（H1 H2A H2B H3 H4）  wgs_skim nuclear
+README = """Multi-copy nuclear markers: rDNA (18S-ITS1-5.8S-ITS2-28S) and histones (H1 H2A H2B H3 H4)  wgs_skim nuclear
 
-summary.tsv   每个样本 x 每个基因：GetOrganelle 与 SPAdes-MitoM 的长度、是否不完整（5'/3'）、组蛋白类别、
-              重叠区错配 / 插入缺失、一致度、结论（identical 相同 | contained 不完整的一条完全包含于另一条 |
-              differ 有差异 | only GetOrganelle | only SPAdes-MitoM）
+summary.tsv   each sample x gene: GetOrganelle and SPAdes-MitoM length, partial (5'/3'), histone class, mismatches /
+              indels in the overlap, identity, verdict (identical | contained: the shorter, partial one lies wholly
+              inside the other | differ | only GetOrganelle | only SPAdes-MitoM)
 rdna/ histone/
-  getorganelle/<样本>/  GetOrganelle 组装（*.path_sequence.fasta、*.selected_graph.gfa、get_org.log.txt）
-  annotation/<样本>/    MitoM 注释：<样本>.rdna.gbf / <样本>.histone.gbf（GenBank），nuc_features.tsv，
-                        consensus/（每个基因一条序列），genes/（每个拷贝），submission/（NCBI table2asn）
-spades_mitom/<样本>/    MitoM 对 SPAdes 全基因组组装的注释，rDNA 与组蛋白一次完成（有 SPAdes 的样本）
-组蛋白类别：replication-dependent 串联基因簇拷贝 | replacement 替换变体（H3.3、含内含子）| single-copy 单拷贝
+  getorganelle/<sample>/  GetOrganelle assembly (*.path_sequence.fasta, *.selected_graph.gfa, get_org.log.txt)
+  annotation/<sample>/    MitoM annotation: <sample>.rdna.gbf / <sample>.histone.gbf (GenBank), nuc_features.tsv,
+                          consensus/ (one sequence per gene), genes/ (every copy), submission/ (NCBI table2asn)
+spades_mitom/<sample>/    MitoM on the SPAdes whole-genome assembly, rDNA and histones in one run (samples with SPAdes)
+pipeline_info/            logs and benchmarks of every job
+Histone classes: replication-dependent (tandem cluster copy) | replacement (variant: H3.3, introns) | single-copy
 """
 
 
