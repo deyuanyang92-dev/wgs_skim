@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "workflow" / "scripts"))
-from seqtools import fasta_lengths, is_circular, iter_fasta, n50  # noqa: E402
+from seqtools import fasta_lengths, is_circular, iter_fasta, n50, read_fasta  # noqa: E402
 from tables import read_tsv, write_tsv  # noqa: E402
 
 COLS = ["function", "sample", "item", "result", "truth", "verdict", "note"]
@@ -28,14 +28,16 @@ def covered(truth_fa, fasta):
     """(% of the truth covered by the fasta, identity %) - blastn, HSPs merged on the truth"""
     out = subprocess.run(["blastn", "-query", str(truth_fa), "-subject", str(fasta), "-evalue", "1e-20",
                           "-outfmt", "6 qstart qend pident length qlen"], capture_output=True, text=True).stdout
+    hsps = sorted((line.split("\t") for line in out.splitlines()), key=lambda h: -int(h[3]))
     pos, ident, aln, qlen = set(), 0.0, 0, 1
-    for line in out.splitlines():
-        a, b, pid, ln, qlen = line.split("\t")
+    for a, b, pid, ln, qlen in hsps:           # longest first; an HSP mostly on covered bases is a repeat copy
         a, b = sorted((int(a), int(b)))
-        pos.update(range(a, b + 1))
+        new = set(range(a, b + 1)) - pos
+        if len(new) < 0.5 * (b - a + 1):
+            continue
+        pos |= new
         ident += float(pid) * int(ln)
         aln += int(ln)
-        qlen = int(qlen)
     return 100 * len(pos) / int(qlen), (ident / aln if aln else 0.0)
 
 
@@ -96,8 +98,11 @@ def main():
                 genes = [k for k, v in r.items() if k not in ("sample", "contigs", "length", "circular",
                                                               "protein_genes", "rRNAs", "tRNAs") and v != "N"]
                 found = int(r["protein_genes"] or 0) + int(r["rRNAs"] or 0)
+                # transcripts: genes shorter than the transcript minimum (300 bp: ATP8) cannot be found
+                want = 15 if src not in ("rna", "trinity") else sum(
+                    len(x) >= 300 for _, x in read_fasta(sim / "truth" / r["sample"] / "mt_genes.fasta"))
                 rows.append(row(fn, r["sample"], f"MitoFinder {src}", f"{found} genes ({r['contigs']} contigs, "
-                                f"{r['tRNAs']} tRNAs)", "15 genes", found >= 15, ",".join(genes)))
+                                f"{r['tRNAs']} tRNAs)", f"{want} genes", found >= want, ",".join(genes)))
             check = summ.parent / "blast" / "samples_check.tsv"
             for r in read_tsv(check):
                 t = truth.get(r["sample"])

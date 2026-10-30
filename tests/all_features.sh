@@ -132,6 +132,11 @@ feat 23 split_by_id "annotation/{s}*/*.mt.gb" "一个合并的 FASTA（多个样
     wgs_skim mitom -i "$out/inputs/merged_mt.fasta" --split-by-id -o @
 feat 24 python_api "assembly/{s}/{s}.busco.txt" "Python 接口 wgs_skim.tool(...) 与命令行结果相同（对比 10）" \
     noj "$py" -c "import sys, wgs_skim; sys.exit(wgs_skim.tool('busco', input=['$out/inputs/asm'], outdir='@', cores=$jobs, mem_gb=$mem))" --
+if [ -d "$sim/refs" ]; then          # related species' mitogenomes (not the simulated ones): SIM_DIR/refs/*.gb
+feat 26 mitofinder_multiref "mitofinder/given/{s}/{s}.mitofinder.fasta mitofinder/given/mitofinder_summary.tsv" \
+    "与 13 相同，但参考 = 5 个近缘种（目录 --ref sim5/refs/）：远缘样品的基因数与 13 比较（推荐用法）" \
+    wgs_skim mitofinder -i "$out/inputs/asm" -o @ --ref "$sim/refs"
+fi
 if command -v nextflow > /dev/null; then
 feat 25 nextflow "mito/{s}/{s}.mt.fasta summary/samples.tsv" "Nextflow 引擎（默认步骤）：与 20 的汇总表比较" \
     wgs_skim run -r "$dna" -o @ --engine nextflow
