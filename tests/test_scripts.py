@@ -476,3 +476,21 @@ def test_extra_copies_from_joined_transcripts(tmp_path):
     extra = seqtools.read_fasta(out / "S.mitofinder.extra_copies.fasta")
     assert extra == [("COX1 t2 46-41", "CCCAAA")]
     assert seqtools.read_fasta(out / "S.mitofinder.fasta") == [("t1", t1)]
+
+
+def test_two_copies_of_a_gene_are_two_organisms():
+    """sim5 S5 (final): own COX1 / CYTB copies 75-80 % to scattered families, contaminant copies 100 % Nephtys -
+    the two contaminant genes match the same mitogenome but must not vouch for each other"""
+    def hit(q, acc, org, fam, pid, slen=17000):
+        return {"qseqid": q, "sacc": acc, "organism": org, "taxonomy": f"Metazoa; Annelida; {fam}; x",
+                "pident": str(pid), "qcovs": "99", "slen": str(slen)}
+    rows = [hit("S|COX1", "KY1", "Eulepethus", "Eulepethidae", 77.2),
+            hit("S_copy2|COX1", "EU293739", "Nephtys sp.", "Nephtyidae", 100),
+            hit("S|CYTB", "PV1", "Terebellides", "Trichobranchidae", 74.9),
+            hit("S_copy2|CYTB", "KY972462", "Nephtys sp. AB", "Nephtyidae", 100, slen=400),
+            hit("S_copy2|CYTB", "EU293739", "Nephtys sp.", "Nephtyidae", 99.6),
+            hit("S|rrnS", "KY2", "Pisione sp.", "Pisionidae", 82.4)]
+    qids = ["S|COX1", "S_copy2|COX1", "S|CYTB", "S_copy2|CYTB", "S|rrnS"]
+    _, samples = mitofinder_check.check(rows, qids, 85)
+    assert samples[0]["verdict"] == "possible contamination: COX1, CYTB"
+    assert samples[0]["family"] != "Nephtyidae"

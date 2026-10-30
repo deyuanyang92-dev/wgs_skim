@@ -81,7 +81,7 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 | `no close reference` | 同科（或别的科）但一致度低：数据库中没有近缘序列，不是污染 |
 | `partial hit` | 命中只覆盖基因 < 50 %，不计入判断 |
 | `possible contamination` | 最佳命中是**别的科**且一致度 ≥ 85 %：污染物与其来源高度相似 |
-| `possible contamination`（完整线粒体规则） | 最佳命中是某物种的**完整线粒体**且 ≥ 97 %，但该样品其他基因都不与这条线粒体相似（≥ 90 %）：真是这个物种的话，其他基因也应命中它。少数基因时多数投票会把污染物当成样品本身（sim5 S5：只有 5 个基因，污染的 Nephtys COX1 100 % 曾被判为样品的科），这条规则不受投票影响 |
+| `possible contamination`（同种规则） | 某拷贝与数据库中某物种 X 几乎相同（≥ 97 %），并且：同一基因的另一个拷贝不是 X（< 90 %）——同一样品有两种不同的 COX1 就是两种生物；或 X 的最佳记录是完整线粒体，而样品其他基因都不与它相似。样品中这些拷贝之外没有任何基因支持 X 时才报（候选拷贝之间不互相作证）。不受多数投票影响：sim5 S5 中污染的 COX1、CYTB 两个基因曾以 2 票把样品判为 Nephtyidae。近缘属（< 97 %）不报 |
 
 输出 `mitofinder/<来源>/blast/`：`samples_check.tsv`（每个样品：多数科与物种、一致的基因数、被标记的基因、结论）、
 `genes_check.tsv`（每个样品每个基因：最佳命中、物种、科、一致度、覆盖度、结论）、`blast_topn.tsv`（全部命中）。
@@ -90,7 +90,7 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 *Travisia*，Opheliidae），部分基因以 72–83 % 命中果蝇、鱼、芋螺等 → 判为 "no close reference"，不误报；把一个样品的 COX1
 换成 *Nephtys*（另一科）的 COX1 → 判为 `possible contamination: COX1 (Nephtyidae, 93.6%)`。
 
-模拟测试（sim5，`tests/sim/`）：S5 的 RNA 中加入 Nephtys（EU293739）的 COX1、CYTB → 报 `possible contamination: COX1`；
+模拟测试（sim5，`tests/sim/`）：S5 的 RNA 中加入 Nephtys（EU293739）的 COX1、CYTB → 报 `possible contamination: COX1, CYTB`（rnaSPAdes 与 Trinity 都是）；同一样品的 DNA 结果不报；
 其余 4 个样品不报（S4 的 rrnS 88.7 % 命中 *Micronephthys*，同科近缘属，不是同一物种，不报）。
 
 关闭：`--no-check`（工具）或 `--config mitofinder_blast=false`；只查部分基因：`--config mitofinder_blast_genes=COX1,CYTB`。

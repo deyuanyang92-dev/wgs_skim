@@ -48,23 +48,40 @@ OTHERS_MATCH = 90              # another gene of that species matches its mitoge
 
 
 def foreign_genes(gs, hits, min_pident, min_qcov):
-    """queries whose best hit is a complete mitogenome of the same species (>= SAME_SPECIES %) that none of the
-    sample's other genes match (>= OTHERS_MATCH %): an animal with that mitogenome in nt would match it with its
-    other genes too. sim5 S5 (Pisione RNA + Nephtys COX1/CYTB): MitoFinder kept the Nephtys COX1 (100 % to
-    EU293739, 17 kb), the other genes hit nothing close - by majority vote alone 'Nephtyidae' became the sample's
-    family. Only near-identical hits: S4 (CWSC001) rrnS 88.7 % to Micronephthys is a related genus, whose other genes
-    are naturally less similar - not a foreign gene. (min_pident: kept for the call signature.)"""
-    out = set()
+    """queries of one sample that come from another organism, X = a database species the query matches
+    near-identically (>= SAME_SPECIES %, over >= min_qcov %):
+      two copies: another copy of the same gene in the sample does not match X (>= OTHERS_MATCH %) - two different
+                  COX1s are two organisms (sim5 S5, Pisione RNA + Nephtys COX1/CYTB: COX1 copy4 100 % Nephtys,
+                  copies 1-3 77-80 % to other families; the two Nephtys genes outvoted the sample's scattered own
+                  genes, so by majority alone the sample became 'Nephtyidae')
+      complete mitogenome: X's best record is a complete mitogenome (>= GENOME_RECORD bp) that none of the sample's
+                  other genes match - with X's mitogenome in nt, X's other genes would match it too (sim5 S5 when
+                  MitoFinder kept only the Nephtys COX1)
+    and in both cases no other gene of the sample (outside these copies) supports X. Related genera are not
+    flagged (S4 rrnS 88.7 % Micronephthys: below SAME_SPECIES). (min_pident: kept for the call signature.)"""
+    def gene(q):
+        return q.rsplit("|", 1)[1]
+
+    def matches(q, b):
+        return any((h["sacc"] == b["sacc"] or h["organism"] == b["organism"]) and float(h["pident"]) >= OTHERS_MATCH
+                   for h in hits.get(q, []))
+    cand = {}
     for g in gs:
         b = hits.get(g["query"], [None])[0]
-        if not b or float(b["pident"]) < SAME_SPECIES or float(b.get("qcovs") or 0) < min_qcov or \
-                int(float(b.get("slen") or 0)) < GENOME_RECORD:
+        if not b or float(b["pident"]) < SAME_SPECIES or float(b.get("qcovs") or 0) < min_qcov:
             continue
-        others = [o for o in gs if o["query"].split("|")[0].split("_copy")[0] == g["query"].split("|")[0].split("_copy")[0]
-                  and o["query"].rsplit("|", 1)[1] != g["query"].rsplit("|", 1)[1] and hits.get(o["query"])]
-        if others and not any(h["sacc"] == b["sacc"] and float(h["pident"]) >= OTHERS_MATCH
-                              for o in others for h in hits[o["query"]]):
-            out.add(g["query"])
+        copies = [o["query"] for o in gs if gene(o["query"]) == gene(g["query"]) and o["query"] != g["query"]
+                  and hits.get(o["query"])]
+        others = [o["query"] for o in gs if gene(o["query"]) != gene(g["query"]) and hits.get(o["query"])]
+        if any(not matches(c, b) for c in copies) or \
+                (int(float(b.get("slen") or 0)) >= GENOME_RECORD and others and not any(matches(o, b) for o in others)):
+            cand.setdefault(b["organism"], []).append((g["query"], b))
+    # candidates do not vouch for each other (the Nephtys COX1 and CYTB of S5 both match the Nephtys mitogenome)
+    every = {q for qs in cand.values() for q, _ in qs}
+    out = set()
+    for org, qs in cand.items():
+        if not any(matches(o["query"], b) for o in gs if o["query"] not in every for _, b in qs):
+            out |= {q for q, _ in qs}
     return out
 
 
@@ -105,8 +122,8 @@ def check(rows, qids, min_pident, min_qcov=50):
                 continue
             pid, cov = float(g["pident"]), float(g["qcovs"] or 0)
             if g["query"] in foreign:
-                g["verdict"] = (f"possible contamination: {g['organism']} ({g['family']}, {pid:.1f}%; its complete "
-                                f"mitogenome {g['best_hit']} matches none of the sample's other genes)")
+                g["verdict"] = (f"possible contamination: {g['organism']} ({g['family']}, {pid:.1f}%; another copy of "
+                                f"the gene or the sample's other genes are not this species)")
             elif cov < min_qcov:
                 g["verdict"] = f"partial hit ({cov:.0f}% of the gene)"
             elif g["family"] == major:
