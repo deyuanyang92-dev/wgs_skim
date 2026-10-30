@@ -62,8 +62,11 @@ def foreign_genes(gs, hits, min_pident, min_qcov):
     def gene(q):
         return q.rsplit("|", 1)[1]
 
+
     def matches(q, b):
-        return any((h["sacc"] == b["sacc"] or h["organism"] == b["organism"]) and float(h["pident"]) >= OTHERS_MATCH
+        real = b["organism"] and not b["organism"].startswith("(")
+        return any((h["sacc"] == b["sacc"] or (real and h["organism"] == b["organism"]))
+                   and float(h["pident"]) >= OTHERS_MATCH
                    for h in hits.get(q, []))
     cand = {}
     for g in gs:
@@ -107,6 +110,8 @@ def check(rows, qids, min_pident, min_qcov=50):
         if b:
             g.update(best_hit=b["sacc"], organism=b["organism"], family=family(b["taxonomy"]),
                      pident=b["pident"], qcovs=b["qcovs"])
+            if not g["family"]:                       # a hit, but its GenBank record could not be fetched
+                g["verdict"] = f"hit {b['sacc']} {float(b['pident']):.1f}%, no GenBank metadata (rerun the check)"
         genes.append(g)
         by_sample.setdefault(base, []).append(g)
     samples = []
@@ -118,11 +123,12 @@ def check(rows, qids, min_pident, min_qcov=50):
                     default="")
         org = Counter(g["organism"] for g in hit if g["family"] == major).most_common(1)
         for g in gs:
-            if not g["family"]:
+            if not g["family"] and g["query"] not in foreign:
                 continue
             pid, cov = float(g["pident"]), float(g["qcovs"] or 0)
             if g["query"] in foreign:
-                g["verdict"] = (f"possible contamination: {g['organism']} ({g['family']}, {pid:.1f}%; another copy of "
+                who = g["organism"] if g["family"] else f"{g['best_hit']} (no GenBank metadata)"
+                g["verdict"] = (f"possible contamination: {who} ({g['family'] or '?'}, {pid:.1f}%; another copy of "
                                 f"the gene or the sample's other genes are not this species)")
             elif cov < min_qcov:
                 g["verdict"] = f"partial hit ({cov:.0f}% of the gene)"
@@ -134,14 +140,17 @@ def check(rows, qids, min_pident, min_qcov=50):
                 g["verdict"] = f"no close reference (best {g['family']} {pid:.1f}%)"
         contam = sorted({g["gene"] for g in gs if g["verdict"].startswith("possible contamination")})
         close = [g for g in gs if g["verdict"] == "ok"]
-        if not hit:
-            verdict = "no hits"
-        elif contam:
+        if contam:
             verdict = f"possible contamination: {', '.join(contam)}"
+        elif not hit:
+            verdict = "no hits"
         elif close:
             verdict = "consistent"
         else:
             verdict = f"consistent family, no close reference in the database (best {major})"
+        no_meta = sum(1 for g in gs if "no GenBank metadata" in g["verdict"])
+        if no_meta:
+            verdict += f" (incomplete: {no_meta} gene(s) without GenBank metadata - rerun the check)"
         samples.append({"sample": s, "family": major, "organism": org[0][0] if org else "",
                         "genes_agree": f"{votes.get(major, 0)}/{len(gs)}", "flagged": ", ".join(
                             f"{g['gene']}: {g['verdict']}" for g in gs if g["verdict"] != "ok"), "verdict": verdict})
@@ -157,13 +166,14 @@ def main():
     ap.add_argument("--topn", type=int, default=5)
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--email", default="")
+    ap.add_argument("--cache", help="GenBank metadata cache (TSV): accessions in it are not fetched again")
     ap.add_argument("--min-pident", type=float, default=85)
     a = ap.parse_args()
     out = Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
     qs = queries(a.genes_dir, a.genes)
     write_fasta(qs, out / "query.fasta", width=0)
-    rows = blast_topn(out / "query.fasta", out / "blast_topn.tsv", a.db, a.topn, a.threads, a.email)
+    rows = blast_topn(out / "query.fasta", out / "blast_topn.tsv", a.db, a.topn, a.threads, a.email, a.cache)
     genes, samples = check(rows, [n for n, _ in qs], a.min_pident)
     write_tsv(out / "genes_check.tsv", genes,
               ["sample", "gene", "query", "best_hit", "organism", "family", "pident", "qcovs", "verdict"])

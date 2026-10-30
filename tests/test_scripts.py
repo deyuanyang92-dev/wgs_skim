@@ -478,6 +478,32 @@ def test_extra_copies_from_joined_transcripts(tmp_path):
     assert seqtools.read_fasta(out / "S.mitofinder.fasta") == [("t1", t1)]
 
 
+def test_hits_without_genbank_metadata_still_checked():
+    """sim5 36 (NCBI efetch down): hits without organism / taxonomy are reported as such (not 'no hit'), the
+    placeholder is no organism match, and a near-identical foreign copy is still flagged by its accession"""
+    ph = "(no GenBank metadata)"
+
+    def hit(q, acc, org, tax, pid, slen=17000):
+        return {"qseqid": q, "sacc": acc, "organism": org, "taxonomy": tax, "pident": str(pid), "qcovs": "99",
+                "slen": str(slen)}
+    rows = [hit("S|COX1", "KY1", ph, "", 77.2), hit("S_copy2|COX1", "EU293739", ph, "", 100),
+            hit("S|rrnS", "KY2", "Pisione sp.", "Metazoa; Pisionidae; Pisione", 82.4)]
+    genes, samples = mitofinder_check.check(rows, ["S|COX1", "S_copy2|COX1", "S|rrnS"], 85)
+    v = {g["query"]: g["verdict"] for g in genes}
+    assert v["S|COX1"].startswith("hit KY1 77.2%, no GenBank metadata")
+    assert v["S_copy2|COX1"].startswith("possible contamination: EU293739")
+    assert samples[0]["verdict"].startswith("possible contamination: COX1") and "incomplete: 2 gene" in samples[0]["verdict"]
+
+
+def test_genbank_meta_uses_the_cache(tmp_path):
+    import blast_taxonomy
+    cache = tmp_path / "meta.tsv"
+    cache.write_text("accession\torganism\ttaxonomy\tdefinition\tseq_length\ttopology\treference\n"
+                     "EU293739\tNephtys sp.\tMetazoa; Nephtyidae\tNephtys mt\t\tcircular\t\n")
+    meta = blast_taxonomy.genbank_meta(["EU293739.1"], cache=cache)   # in the cache: no network
+    assert meta["EU293739"]["organism"] == "Nephtys sp."
+
+
 def test_two_copies_of_a_gene_are_two_organisms():
     """sim5 S5 (final): own COX1 / CYTB copies 75-80 % to scattered families, contaminant copies 100 % Nephtys -
     the two contaminant genes match the same mitogenome but must not vouch for each other"""

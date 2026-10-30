@@ -86,9 +86,62 @@ def queries(locus, fastas, gbs, wanted, extract):
     return out
 
 
-def blast_topn(query, out_tsv, db="", topn=5, threads=8, email=""):
+NO_META = "(no GenBank metadata)"      # organism of a hit whose GenBank record could not be fetched
+
+
+def _fetch(accs, email, attempts=4):
+    """{accession: metadata} of GenBank records (header only: seq_start = seq_stop = 1 - rDNA hits are often
+    chromosome-scale records). A batch that keeps failing is split in two: one bad accession (HTTP 400) or a dropped
+    connection on a large request does not lose the others (MJ / sim5 2026-10-30: 'Remote end closed connection',
+    'HTTP Error 400' on 100-accession batches; 203 of 372 hits without taxonomy)"""
+    from Bio import Entrez, SeqIO
+    Entrez.email = email or "wgs_skim@example.org"
+    for attempt in range(attempts):
+        try:
+            out = {}
+            with Entrez.efetch(db="nucleotide", id=",".join(accs), rettype="gb", retmode="text",
+                               seq_start=1, seq_stop=1) as h:
+                for rec in SeqIO.parse(h, "genbank"):
+                    a = rec.annotations
+                    refs = a.get("references") or []
+                    out[rec.id.split(".")[0]] = {
+                        "organism": a.get("organism", ""), "taxonomy": "; ".join(a.get("taxonomy", [])),
+                        "definition": rec.description, "seq_length": "", "topology": a.get("topology", ""),
+                        "reference": refs[0].title if refs else ""}
+            return out
+        except Exception as e:                        # network / NCBI: wait and retry
+            print(f"efetch of {len(accs)} records failed ({e}), attempt {attempt + 1}/{attempts}", file=sys.stderr,
+                  flush=True)
+            time.sleep(min(60, 10 * 2 ** attempt))
+    if len(accs) > 1:
+        half = len(accs) // 2
+        return {**_fetch(accs[:half], email, 2), **_fetch(accs[half:], email, 2)}
+    return {}
+
+
+def genbank_meta(accs, email="", cache=None):
+    """{accession (no version): organism, taxonomy, definition, topology, reference} of the hits. A cache file (TSV,
+    e.g. <db_dir>/genbank_metadata.tsv) keeps fetched records: an accession is fetched once"""
+    from tables import read_tsv
+    keys = ["accession"] + GB_FIELDS
+    known = {r["accession"]: r for r in read_tsv(cache)} if cache else {}
+    want = sorted({a.split(".")[0] for a in accs} - set(known))
+    new = {}
+    for i in range(0, len(want), 50):
+        new.update(_fetch(want[i:i + 50], email))
+    if cache and new:
+        Path(cache).parent.mkdir(parents=True, exist_ok=True)
+        write_tsv(cache, [{"accession": k, **v} for k, v in new.items()], keys, append=True)
+    missing = len(want) - len(new)
+    if missing:
+        print(f"no GenBank metadata for {missing} of {len(want)} accessions (rerun to fetch them)", file=sys.stderr)
+    return {k: {f: v.get(f, "") for f in GB_FIELDS} for k, v in {**known, **new}.items()}
+
+
+def blast_topn(query, out_tsv, db="", topn=5, threads=8, email="", cache=None):
     """blastn of every query against a local database (or NCBI nt online), the TopN distinct accessions per query
-    by bitscore with their GenBank organism / taxonomy / title; writes out_tsv, returns the rows"""
+    by bitscore with their GenBank organism / taxonomy / title (genbank_meta; cache: see there); writes out_tsv,
+    returns the rows"""
     query, out_tsv = Path(query), Path(out_tsv)
     rows = []
     if query.stat().st_size:
@@ -109,32 +162,11 @@ def blast_topn(query, out_tsv, db="", topn=5, threads=8, email=""):
         for q in hits:
             rows += sorted(hits[q].values(), key=lambda r: -float(r["bitscore"]))[:topn]
 
-        # GenBank records of the hits, 100 per request; seq_start/seq_stop = 1: the annotation header only
-        # (organism, taxonomy, title, references) - rDNA hits are often chromosome-scale records, whose sequences
-        # would be downloaded otherwise (time-outs, then no metadata); the length comes from BLAST (slen)
-        from Bio import Entrez, SeqIO
-        Entrez.email = email or "wgs_skim@example.org"
-        meta, accs = {}, sorted({r["sacc"] for r in rows})
-        for i in range(0, len(accs), 100):
-            for attempt in range(3):
-                try:
-                    with Entrez.efetch(db="nucleotide", id=",".join(accs[i:i + 100]), rettype="gb", retmode="text",
-                                       seq_start=1, seq_stop=1) as h:
-                        for rec in SeqIO.parse(h, "genbank"):
-                            a = rec.annotations
-                            refs = a.get("references") or []
-                            meta[rec.id.split(".")[0]] = {
-                                "organism": a.get("organism", ""), "taxonomy": "; ".join(a.get("taxonomy", [])),
-                                "definition": rec.description, "seq_length": "",
-                                "topology": a.get("topology", ""), "reference": refs[0].title if refs else ""}
-                    break
-                except Exception as e:                       # network: retry, then leave the metadata empty
-                    print(f"efetch failed ({e}), attempt {attempt + 1}/3", file=sys.stderr, flush=True)
-                    time.sleep(10 * (attempt + 1))
+        meta = genbank_meta(sorted({r["sacc"] for r in rows}), email, cache)
         for r in rows:
             r.update(meta.get(r["sacc"].split(".")[0], dict.fromkeys(GB_FIELDS, "")) | {"seq_length": r.get("slen", "")})
             if not r["organism"]:
-                r["organism"] = "(efetch failed)"            # visible in the table, not only in the log
+                r["organism"] = NO_META                      # visible in the table, not only in the log
 
     write_tsv(out_tsv, rows, FIELDS + GB_FIELDS)
     print(f"{len(rows)} hits for {len({r['qseqid'] for r in rows})} sequences", file=sys.stderr)
@@ -150,7 +182,8 @@ def main_snakemake(sm):
         queries("nr", sm.input.get("nr", []), by_sample(sm.input.get("nr_gb", [])), sm.params.nr, nr_regions)
     with open(query, "w") as fh:
         fh.writelines(f">{n}\n{q}\n" for n, q in qs if q)
-    blast_topn(query, sm.output.tsv, sm.params.db, sm.params.topn, sm.threads, sm.params.email)
+    blast_topn(query, sm.output.tsv, sm.params.db, sm.params.topn, sm.threads, sm.params.email,
+               sm.params.get("cache"))
 
 
 if __name__ == "__main__":
@@ -165,5 +198,6 @@ if __name__ == "__main__":
         ap.add_argument("--topn", type=int, default=5)
         ap.add_argument("--threads", type=int, default=8)
         ap.add_argument("--email", default="")
+        ap.add_argument("--cache", help="GenBank metadata cache (TSV): accessions in it are not fetched again")
         a = ap.parse_args()
-        blast_topn(a.query, a.out, a.db, a.topn, a.threads, a.email)
+        blast_topn(a.query, a.out, a.db, a.topn, a.threads, a.email, a.cache)

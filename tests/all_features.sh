@@ -18,7 +18,7 @@ mkdir -p "$out/inputs"
 samples=$(wgs_skim samples -r "$dna" 2>/dev/null | cut -f1)
 first=$(echo "$samples" | head -1)
 py=$(head -1 "$(command -v wgs_skim)" | sed 's/^#!//')      # the Python wgs_skim is installed in (API check)
-tsv=$out/features.$lane${ONLY:+.rerun}.tsv
+tsv=$out/features.$lane${ONLY:+.rerun_$(date +%Y%m%d_%H%M%S)}.tsv   # each rerun its own record
 echo -e "id\tfunction\tresult\tseconds\toutput\tcommand\tmissing\twhat" > "$tsv"
 fail=0
 
@@ -54,80 +54,80 @@ links() {   # links DIR PATTERN: OUT/inputs/DIR/<s>.fasta -> the per-sample file
 
 if [ "$lane" = dna ] || [ "$lane" = all ]; then
 echo "[features] DNA: $(echo $samples)" >&2
-feat 01 samples "samples.tsv" "样品名识别是否正确（5 个，R1/R2 配对）" \
+feat 01 samples "samples.tsv" "sample names detected from a reads directory (5 samples, R1/R2 paired): samples.tsv" \
     bash -c "wgs_skim samples -r $dna > @/samples.tsv; cat @/samples.tsv" --
 feat 02 fastp "fastp/{s}/{s}.R1.fq.gz fastp/{s}/{s}.fastp.html fastp/fastp_summary.tsv" \
-    "fastp/fastp_summary.tsv：每个样品 clean 数据量、Q30；fastp/<样品>/：clean reads 与报告（后面的功能都直接用这里的 clean reads）" \
+    "fastp, once: clean reads and reports; fastp/fastp_summary.tsv = data and Q30 per sample. Every later DNA function reads these clean reads where they are" \
     wgs_skim fastp -r "$dna" -o @
 clean=$out/02_fastp/fastp            # clean reads of every later DNA function (used where they are, no QC again)
-feat 03 meangs "meangs/{s}/{s}.seed.fasta meangs/meangs_summary.tsv" "meangs/meangs_summary.tsv：每个样品的线粒体种子长度" \
+feat 03 meangs "meangs/{s}/{s}.seed.fasta meangs/meangs_summary.tsv" "MEANGS mitochondrial seed per sample; meangs/meangs_summary.tsv" \
     wgs_skim meangs -r "$clean" -o @
 feat 04 getorganelle_mt "getorganelle/{s}/{s}.getorganelle.json getorganelle/getorganelle_summary.tsv" \
-    "GetOrganelle 自带种子（animal_mt）：getorganelle_summary.tsv 的长度、环化、轮次；种子太远时可能没有结果——这正是推荐 05 的原因" \
+    "GetOrganelle with its own animal_mt seeds; getorganelle/getorganelle_summary.tsv = length, circular, rounds. Seeds far from the sample can give nothing - the reason for 05" \
     wgs_skim getorganelle -r "$clean" -o @
 feat 05 meangs-getorganelle "mitogenome/{s}/{s}.mt.fasta mitogenome/mitogenome_summary.tsv" \
-    "推荐组合：MEANGS 种子 + GetOrganelle，未成环时迭代。mitogenome/mitogenome_summary.tsv：最终线粒体长度、是否环状（真值 S1-S4 环状，S5 线状）" \
+    "recommended: MEANGS seed + GetOrganelle, reseeded while not circular; mitogenome/mitogenome_summary.tsv = final length and topology (truth: S1-S4 circular, S5 linear)" \
     wgs_skim run -r "$clean" --no-qc -o @ --steps meangs-getorganelle
 feat 06 getorganelle_nr "rdna/{s}/{s}.rdna.gbf histone/{s}/{s}.histone.gbf rdna/rdna_summary.tsv" \
-    "rdna/、histone/：每个样品的 rDNA 单元（18S-ITS1-5.8S-ITS2-28S）与组蛋白簇，GenBank 注释（.gbf）" \
+    "rDNA unit (18S-ITS1-5.8S-ITS2-28S) and histone cluster per sample, GenBank annotation (.gbf)" \
     wgs_skim getorganelle -r "$clean" -o @ --target nr
-feat 07 spades_genome "spades/{s}/{s}.scaffolds.fasta spades/spades_summary.tsv" "spades/spades_summary.tsv：总长（真值 ~20 Mb）、N50" \
+feat 07 spades_genome "spades/{s}/{s}.scaffolds.fasta spades/spades_summary.tsv" "SPAdes genome assembly; spades/spades_summary.tsv = total length (truth ~20 Mb), N50" \
     wgs_skim spades -r "$clean" -o @
-feat 08 spades_meta "spades/{s}/{s}.meta.fasta spades/spades_summary.tsv" "metaSPAdes 模式：spades_summary.tsv 与 07 比较" \
+feat 08 spades_meta "spades/{s}/{s}.meta.fasta spades/spades_summary.tsv" "metaSPAdes; compare spades_summary.tsv with 07" \
     wgs_skim spades -r "$clean" -o @ --mode meta
 feat 09 genome-size "genomescope/{s}/{s}.genomescope.txt genomescope/genomescope_summary.tsv" \
-    "genomescope/genomescope_summary.tsv：基因组大小（真值 ~20 Mb）、杂合度（真值 0.2 %）" \
+    "GenomeScope; genomescope/genomescope_summary.tsv = genome size (truth ~20 Mb), heterozygosity (truth 0.2 %)" \
     wgs_skim genome-size -r "$clean" -o @
 links asm "$out/07_spades_genome/spades/{s}/{s}.scaffolds.fasta"
 links mt "$out/05_meangs-getorganelle/mitogenome/{s}/{s}.mt.fasta"
-feat 10 busco_genome "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "busco/busco_summary.tsv：完整度（20 Mb 片段只含少量基因，值低是正常的）" \
+feat 10 busco_genome "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "BUSCO of given assemblies (-i); busco/busco_summary.tsv (a 20 Mb piece holds few genes: low completeness is expected)" \
     wgs_skim busco -i "$out/inputs/asm" -o @
-feat 11 mitom "mitom/{s}/{s}.mt.gb mitom/mitom_summary.tsv" "mitom/mitom_summary.tsv：13 PCG + 2 rRNA + 22 tRNA" \
+feat 11 mitom "mitom/{s}/{s}.mt.gb mitom/mitom_summary.tsv" "MitoM annotation of given mitogenomes (-i); mitom/mitom_summary.tsv = 13 PCG + 2 rRNA + 22 tRNA" \
     wgs_skim mitom -i "$out/inputs/mt" -o @
 ref=$out/11_mitom/mitom/$first/$first.mt.gb
-feat 12 blast "blast/blast_topn.tsv" "blast/blast_topn.tsv：cox1 / 16S 的最佳命中物种与相似度（本地 metazoa_marker 库）" \
+feat 12 blast "blast/blast_topn.tsv" "BLAST of cox1 and 16S against the local metazoa_marker database: best hit species and identity" \
     wgs_skim blast -i "$out/inputs/mt" -o @ --genes cox1,16s
 feat 13 mitofinder_assembly "mitofinder_assembly/{s}/{s}.mitofinder.fasta mitofinder_assembly/mitofinder_summary.tsv" \
-    "MitoFinder 在组装上，参考 = 1 个远缘种（$first）。mitofinder_assembly/：<样品>/ + mitofinder_summary.tsv（基因表）+ genes/ + contamination/" \
+    "MitoFinder on assemblies, one distant reference (S1). mitofinder_assembly/: <sample>/ + mitofinder_summary.tsv (gene table) + genes/ + contamination/" \
     wgs_skim mitofinder -i "$out/inputs/asm" -o @ --ref "$ref"
 feat 14 mitofinder_reads "mitofinder_megahit/{s}/{s}.mitofinder.fasta mitofinder_megahit/mitofinder_summary.tsv" \
-    "MitoFinder 自己组装 reads（MEGAHIT）：与 13 比较" \
+    "MitoFinder assembling the reads itself (MEGAHIT); compare with 13" \
     wgs_skim mitofinder -r "$clean" -o @ --ref "$ref"
 feat 15 mitofinder_bioconda "mitofinder_assembly/{s}/{s}.mitofinder.fasta mitofinder_assembly/mitofinder_summary.tsv" \
-    "bioconda MitoFinder 1.4.1（没有 Singularity 镜像时）：tRNA 用 tRNAscan-SE；与 13 比较" \
+    "bioconda MitoFinder 1.4.1 (no Singularity image): tRNAs from tRNAscan-SE; compare with 13" \
     wgs_skim mitofinder -i "$out/inputs/asm" -o @ --ref "$ref" --config mitofinder_sif=
 if [ -d "$sim/refs" ]; then          # related species' mitogenomes (not the simulated ones): SIM_DIR/refs/*.gb
 feat 16 mitofinder_multiref "mitofinder_assembly/{s}/{s}.mitofinder.fasta mitofinder_assembly/mitofinder_summary.tsv" \
-    "与 13 相同，但参考 = 5 个近缘种（--ref 目录）：远缘样品的基因数与 13 比较（推荐用法）" \
+    "as 13 with 5 related references (--ref directory): gene counts of the distant samples against 13 (recommended use)" \
     wgs_skim mitofinder -i "$out/inputs/asm" -o @ --ref "$sim/refs"
 fi
-feat 17 spades-busco "spades/{s}/{s}.scaffolds.fasta busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "组合：SPAdes → BUSCO" \
+feat 17 spades-busco "spades/{s}/{s}.scaffolds.fasta busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "combination SPAdes -> BUSCO" \
     wgs_skim run -r "$clean" --no-qc -o @ --steps spades-busco
 feat 18 spades-mitofinder "mitofinder_spades/{s}/{s}.mitofinder.fasta mitogenome/{s}/{s}.mt.fasta mitofinder_spades/mitofinder_summary.tsv" \
-    "组合：GetOrganelle 线粒体 + SPAdes-MitoFinder（参考 = 每个样品自己的 MitoM 注释）" \
+    "combination: GetOrganelle mitogenome + SPAdes-MitoFinder (reference = each sample's own MitoM annotation)" \
     wgs_skim run -r "$clean" --no-qc -o @ --steps meangs-getorganelle,spades-mitofinder
-feat 19 circularize "{s}/{s}.circularize.tsv" "无 reads 环化：每个样品的 method（walk / overlap / join）与环长" \
+feat 19 circularize "{s}/{s}.circularize.tsv" "circularization without reads: method (walk / overlap / join) and circle length per sample" \
     noj bash -c "for s in $(echo $samples); do wgs_skim circularize -i $out/18_spades-mitofinder/mitofinder_spades/\$s/\$s.mitofinder.fasta --spades $out/18_spades-mitofinder/spades/\$s/spades -o @/\$s --prefix \$s || exit 1; done" --
-feat 20 compare "{s}/{s}.compare.tsv all.compare.html" "GetOrganelle 与 SPAdes-MitoFinder 是否一致：all.compare.tsv 的 verdict，<样品>/ 中差异与图" \
+feat 20 compare "{s}/{s}.compare.tsv all.compare.html" "GetOrganelle vs SPAdes-MitoFinder: verdict in all.compare.tsv; differences and figure per sample" \
     wgs_skim compare --results "$out/18_spades-mitofinder" -o @
 feat 21 run_all "summary/samples.tsv summary/report.html fastp/fastp_summary.tsv" \
-    "完整流程（原始 reads，默认全部步骤）：summary/samples.tsv 每样品一行；各工具目录下有自己的 *_summary.tsv" \
+    "the full workflow from raw reads (every step): summary/samples.tsv, plus each tool's *_summary.tsv" \
     wgs_skim run -r "$dna" -o @
-feat 22 nuclear "summary.tsv" "核多拷贝基因：GetOrganelle 与 SPAdes-MitoM 逐基因比较（verdict）" \
+feat 22 nuclear "summary.tsv" "nuclear markers: GetOrganelle vs SPAdes-MitoM per gene (verdict)" \
     wgs_skim nuclear --results "$out/21_run_all" -o @
 printf "sample\tfastq_1\tfastq_2\tscaffolds\tmitogenome\n" > "$out/inputs/sheet_given.tsv"
 for s in $samples; do printf "%s\t%s\t%s\t%s\t%s\n" "$s" "$clean/$s/$s.R1.fq.gz" "$clean/$s/$s.R2.fq.gz" \
     "$out/inputs/asm/$s.fasta" "$out/inputs/mt/$s.fasta" >> "$out/inputs/sheet_given.tsv"; done
 feat 23 sheet_given "summary/samples.tsv mitom/{s}/{s}.mt.gb busco/busco_summary.tsv" \
-    "样品表给出已有组装与线粒体：不重新组装，直接 BUSCO / MitoM / BLAST" \
+    "sample sheet with existing assemblies and mitogenomes: no assembly, BUSCO / MitoM / BLAST on them" \
     wgs_skim run -s "$out/inputs/sheet_given.tsv" --no-qc -o @ --steps busco,annotate,blast,summary
 cat "$out"/inputs/mt/*.fasta > "$out/inputs/merged_mt.fasta"
-feat 24 split_by_id "mitom/{s}*/*.mt.gb" "一个合并的 FASTA（多个样品）按序列名拆分后批量注释：mitom/<样品>/" \
+feat 24 split_by_id "mitom/{s}*/*.mt.gb" "one merged FASTA of several samples, split by sequence name, annotated per sample" \
     wgs_skim mitom -i "$out/inputs/merged_mt.fasta" --split-by-id -o @
-feat 25 python_api "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "Python 接口 wgs_skim.tool(...)：与 10 相同" \
+feat 25 python_api "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "Python interface wgs_skim.tool(...): same as 10" \
     noj "$py" -c "import sys, wgs_skim; sys.exit(wgs_skim.tool('busco', input=['$out/inputs/asm'], outdir='@', cores=$jobs, mem_gb=$mem))" --
 if command -v nextflow > /dev/null; then
-feat 26 nextflow "mitogenome/{s}/{s}.mt.fasta summary/samples.tsv" "Nextflow 引擎（原始 reads，默认步骤）：与 21 的汇总表比较" \
+feat 26 nextflow "mitogenome/{s}/{s}.mt.fasta summary/samples.tsv" "the Nextflow engine (raw reads, default steps): compare summary/samples.tsv with 21" \
     wgs_skim run -r "$dna" -o @ --engine nextflow
 fi
 fi
@@ -137,28 +137,28 @@ echo "[features] RNA: $(echo $samples)" >&2
 # MitoFinder reference of the RNA lane (runs beside the DNA lane, so not a DNA-lane output): the first sample's
 # source GenBank (truth.tsv mt_source) - as a related species' mitogenome would be in a real study
 ref=$(awk -F'\t' 'NR == 2 {for (i = 1; i <= NF; i++) if (h[i] == "mt_source") print $i} NR == 1 {for (i = 1; i <= NF; i++) h[i] = $i}' "$sim/truth.tsv")
-feat 30 fastp_rna "fastp/{s}/{s}.R1.fq.gz fastp/fastp_summary.tsv" "RNA-seq 质控（只做一次，后面的 RNA 功能都用这里的 clean reads）" \
+feat 30 fastp_rna "fastp/{s}/{s}.R1.fq.gz fastp/fastp_summary.tsv" "fastp of the RNA-seq reads, once: every later RNA function reads these clean reads" \
     wgs_skim fastp -r "$rna" -o @
 rclean=$out/30_fastp_rna/fastp
-feat 31 rnaspades "spades/{s}/{s}.rna.fasta spades/spades_summary.tsv" "rnaSPAdes：spades_summary.tsv 的转录本数、总长" \
+feat 31 rnaspades "spades/{s}/{s}.rna.fasta spades/spades_summary.tsv" "rnaSPAdes: transcripts per sample in spades/spades_summary.tsv" \
     wgs_skim spades -r "$rclean" -o @ --mode rna
-feat 32 trinity "trinity/{s}/{s}.trinity.fasta trinity/trinity_summary.tsv" "Trinity：trinity_summary.tsv 与 31 比较" \
+feat 32 trinity "trinity/{s}/{s}.trinity.fasta trinity/trinity_summary.tsv" "Trinity: trinity/trinity_summary.tsv, compare with 31" \
     wgs_skim trinity -r "$rclean" -o @
 links rna "$out/31_rnaspades/spades/{s}/{s}.rna.fasta"
-feat 33 busco_transcriptome "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "BUSCO -m transcriptome（核转录本取自真实 RNA-seq 组装）" \
+feat 33 busco_transcriptome "busco/{s}/{s}.busco.txt busco/busco_summary.tsv" "BUSCO -m transcriptome (nuclear transcripts taken from a real RNA-seq assembly)" \
     wgs_skim busco -i "$out/inputs/rna" -o @ -m transcriptome
-feat 34 rnaspades-busco "spades/{s}/{s}.rna.fasta busco/{s}/{s}.rna.busco.txt busco/busco_summary.tsv" "组合（推荐）：rnaSPAdes → BUSCO" \
+feat 34 rnaspades-busco "spades/{s}/{s}.rna.fasta busco/{s}/{s}.rna.busco.txt busco/busco_summary.tsv" "combination (recommended) rnaSPAdes -> BUSCO" \
     wgs_skim run -r "$rclean" --no-qc -o @ --steps rnaspades-busco
-feat 35 trinity-busco "trinity/{s}/{s}.trinity.fasta busco/{s}/{s}.trinity.busco.txt busco/busco_summary.tsv" "组合：Trinity → BUSCO" \
+feat 35 trinity-busco "trinity/{s}/{s}.trinity.fasta busco/{s}/{s}.trinity.busco.txt busco/busco_summary.tsv" "combination Trinity -> BUSCO" \
     wgs_skim run -r "$rclean" --no-qc -o @ --steps trinity-busco
 feat 36 rnaspades-mitofinder "mitofinder_rnaspades/{s}/{s}.mitofinder.fasta mitofinder_rnaspades/mitofinder_summary.tsv mitofinder_rnaspades/contamination/samples_check.tsv" \
-    "转录组线粒体基因：mitofinder_summary.tsv（基因表，N = 未找到）；contamination/samples_check.tsv：S5 应报 COX1、CYTB 可能污染，其余不报" \
+    "mitochondrial genes from RNA-seq: mitofinder_summary.tsv (gene table, N = not found); contamination/samples_check.tsv: S5 must report COX1, CYTB, the others nothing" \
     wgs_skim run -r "$rclean" --no-qc -o @ --steps rnaspades-mitofinder --mitofinder-ref "$ref"
 feat 37 trinity-mitofinder "mitofinder_trinity/{s}/{s}.mitofinder.fasta mitofinder_trinity/mitofinder_summary.tsv mitofinder_trinity/contamination/samples_check.tsv" \
-    "同 36，Trinity 转录本" \
+    "as 36 with Trinity transcripts" \
     wgs_skim run -r "$rclean" --no-qc -o @ --steps trinity-mitofinder --mitofinder-ref "$ref"
 feat 38 mitofinder_rna_tool "mitofinder_rnaspades/mitofinder_summary.tsv mitofinder_trinity/mitofinder_summary.tsv" \
-    "单独命令：wgs_skim mitofinder --assembler rnaspades,trinity（两种来源各一个目录）" \
+    "the tool command wgs_skim mitofinder --assembler rnaspades,trinity (one directory per source)" \
     wgs_skim mitofinder -r "$rclean" -o @ --ref "$ref" --assembler rnaspades,trinity
 fi
 

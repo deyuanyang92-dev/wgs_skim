@@ -12,6 +12,7 @@ rule blast:
         samples=list(SAMPLES),
         mt=BLAST_MT,
         nr=BLAST_NR,
+        cache=str(DB / "genbank_metadata.tsv"),       # GenBank organism / taxonomy of hits, fetched once
     resources:
         mem_mb=48000,                     # a local nt / marker database is memory-mapped: 47.5 GB peak (metazoa_marker)
     log:

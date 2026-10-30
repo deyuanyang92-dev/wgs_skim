@@ -184,6 +184,7 @@ rule mitofinder_blast:
         email=f"--email {config['email']}" if config["email"] else "",
         topn=config["blast_topn"],
         min_pident=config["mitofinder_min_pident"],
+        cache=str(DB / "genbank_metadata.tsv"),
     log:
         f"{OUT}pipeline_info/logs/mitofinder_{{src}}/blast.log",
     benchmark:
@@ -198,4 +199,4 @@ rule mitofinder_blast:
     shell:
         "python {workflow.basedir}/scripts/mitofinder_check.py --genes-dir {params.genes_dir} -o {params.out} "
         "--genes {params.genes} {params.db} {params.email} --topn {params.topn} --threads {threads} "
-        "--min-pident {params.min_pident} > {log} 2>&1"
+        "--min-pident {params.min_pident} --cache {params.cache} > {log} 2>&1"

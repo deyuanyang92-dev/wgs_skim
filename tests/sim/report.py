@@ -152,7 +152,7 @@ def main():
     checks = read_tsv(out / "truth_check.tsv")
     truth = {r["sample"]: r for r in read_tsv(sim / "truth.tsv")}
     runs = {}
-    for f in sorted(out.glob("features.*.tsv")):            # the latest run of each function wins
+    for f in sorted(out.glob("features.*.tsv"), key=lambda x: x.stat().st_mtime):   # the latest run of each wins
         for r in read_tsv(f):
             runs[f"{r['id']}_{r['function']}"] = r
     index = ["# wgs_skim: every function on 5 simulated samples", "",
