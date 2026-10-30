@@ -126,12 +126,12 @@ OTHER_MODES = [m for m in MODES if m != "genome"]
 if STEPS and set(STEPS) == {"summary"}:
     def have(pattern):
         return all(Path(OUT_PATH, pattern.format(sample=s)).exists() for s in SAMPLES)
-    config["mito"] = have("mito/{sample}/{sample}.mt.fasta")
+    config["mito"] = have("mitogenome/{sample}/{sample}.mt.fasta")
     config["nr"] = have("rdna/{sample}/{sample}.nr.fasta")
-    config["assembly"] = have("assembly/{sample}/{sample}.busco.txt")
-    config["nuc_markers"] = have("nuclear/{sample}/{sample}.copy_number.tsv")
-    config["genome_size"] = have("genome_size/{sample}/{sample}.genomescope.txt")
-    config["annotate"] = have("annotation/{sample}/{sample}.mt.gb")
+    config["assembly"] = have("busco/{sample}/{sample}.busco.txt")
+    config["nuc_markers"] = have("nuclear_markers/{sample}/{sample}.copy_number.tsv")
+    config["genome_size"] = have("genomescope/{sample}/{sample}.genomescope.txt")
+    config["annotate"] = have("mitom/{sample}/{sample}.mt.gb")
     config["topology"] = "yes" if have("topology/{sample}/{sample}.topology.tsv") else "no"
     config["blast"] = Path(OUT_PATH, "blast/blast_topn.tsv").exists()
 
@@ -178,16 +178,30 @@ MT_ITER_MEM = getorganelle_mem_mb(config["mt_iter_max_data_gb"])
 NUC_MEM = getorganelle_mem_mb(max(float(x) for x in str(config["nuclear_max_gb"]).split(",") if x.strip()))
 
 
+MT_FASTA = object()             # targets marker: each sample's final mitogenome (mt_of)
+SCAFFOLDS = object()            # targets marker: each sample's genome assembly (scaffolds_of)
+
+
+def scaffolds_of(sample):
+    """the genome assembly of a sample: SPAdes, or the one given in the sample sheet (linked under pipeline_info)"""
+    return (rules.assembly_given if sample in GIVEN_ASM else rules.spades).output.scaffolds.format(sample=sample)
+
+
+def mt_of(sample, what="fasta"):
+    """the final mitogenome (fasta) or its record (status) of a sample: chosen by mt_select, or given"""
+    return getattr((rules.mt_given if sample in GIVEN_MT else rules.mt_select).output, what).format(sample=sample)
+
+
 def final_outputs():
     s = list(SAMPLES)
     if STEPS:
         targets = {
-            "fastp": [rules.fastp.output.json],
+            "fastp": [rules.fastp.output.html],
             "meangs": [rules.meangs.output.seed],
-            "mito": [rules.mt_select.output.fasta],
-            "getorganelle": [rules.mt_select.output.fasta],
+            "mito": [MT_FASTA],
+            "getorganelle": [MT_FASTA],
             "nr": [rules.nr_annotate.output.gb, rules.histone_annotate.output.gb],
-            "spades": ([rules.spades.output.scaffolds] if "genome" in MODES else [])
+            "spades": ([SCAFFOLDS] if "genome" in MODES else [])
             + [rules.spades_mode.output.fasta.replace("{mode}", m) for m in OTHER_MODES],
             "busco": ([rules.busco.output.summary] if "genome" in MODES else [])
             + [rules.busco_assembly.output.summary.replace("{asm}", m) for m in OTHER_MODES],
@@ -203,7 +217,9 @@ def final_outputs():
         }
         if "busco" in STEPS and "trinity" in STEPS:
             targets["busco"].append(rules.busco_assembly.output.summary.replace("{asm}", "trinity"))
-        out = [f for x in STEPS for t in targets.get(x, []) for f in expand(t, sample=s)]
+        out = [f for x in STEPS for t in targets.get(x, []) for f in
+               ([mt_of(y) for y in s] if t is MT_FASTA else [scaffolds_of(y) for y in s] if t is SCAFFOLDS
+                else expand(t, sample=s))]
         if "mitofinder" in STEPS:
             out += mitofinder_targets(rules.mitofinder.output.fasta)
             srcs = sorted({x for s_ in SAMPLES for x in mitofinder_sources(s_)})
@@ -214,15 +230,15 @@ def final_outputs():
             out.append(rules.blast.output.tsv)
         if "summary" in STEPS:
             out.append(rules.summary.output.tsv)
-        return out
-    out = [f"{OUT}summary/samples.tsv"]
+        return out + tool_summary_targets()
+    out = [f"{OUT}summary/samples.tsv"] + tool_summary_targets()
     if config["mitofinder"]:
         srcs = sorted({x for s_ in SAMPLES for x in mitofinder_sources(s_)})
         out += [rules.mitofinder_summary.output.tsv.format(src=x) for x in srcs]
         if config["mitofinder_blast"]:
             out += [rules.mitofinder_blast.output.samples.format(src=x) for x in srcs]
     if config["mito"]:
-        out += expand(f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta", sample=s)
+        out += [mt_of(x) for x in s]
     if config["assembly"]:
         out += expand([rules.busco_assembly.output.summary.replace("{asm}", m) for m in OTHER_MODES], sample=s)
     if config["nr"]:
@@ -243,7 +259,7 @@ def mt_seed(wildcards):
 def mt_select_inputs(wildcards):
     d = {"fasta": rules.mt_iterate.output.fasta, "status": rules.mt_iterate.output.status, "seed": mt_seed(wildcards)}
     if config["assembly"] and config["mt_from_spades"]:
-        d["scaffolds"] = rules.spades.output.scaffolds
+        d["scaffolds"] = scaffolds_of(wildcards.sample)
     return d
 
 
@@ -257,7 +273,7 @@ def blast_inputs(wildcards):
     s = list(SAMPLES)
     d = {"mt": [], "gb": [], "nr": []}
     if config["mito"]:
-        d["mt"] = expand(rules.mt_select.output.fasta, sample=s)
+        d["mt"] = [mt_of(x) for x in s]
         if config["annotate"] and any(x != "full" for x in BLAST_MT):
             d["gb"] = expand(rules.mitom_annotate.output.gb, sample=s)
     if config["nr"]:
@@ -269,14 +285,14 @@ def blast_inputs(wildcards):
 
 def summary_inputs(wildcards):
     s = list(SAMPLES)
-    d = {"fastp": expand(rules.fastp.output.json, sample=s)}
+    d = {"fastp": [reads_json(x) for x in s if x not in NO_READS]}
     if config["mito"]:
-        d["mt"] = expand(rules.mt_select.output.status, sample=s)
-        d["mt_fasta"] = expand(rules.mt_select.output.fasta, sample=s)
+        d["mt"] = [mt_of(x, "status") for x in s]
+        d["mt_fasta"] = [mt_of(x) for x in s]
     if config["nr"]:
         d["nr"] = expand(rules.getorganelle_nr.output.fasta, sample=s)
     if config["assembly"]:
-        d["scaffolds"] = expand(rules.spades.output.scaffolds, sample=s)
+        d["scaffolds"] = [scaffolds_of(x) for x in s]
         d["busco"] = expand(rules.busco.output.summary, sample=s)
     if config["assembly"] and config["nuc_markers"]:
         d["nuclear"] = expand(rules.nuc_copies.output.tsv, sample=s)
@@ -289,3 +305,41 @@ def summary_inputs(wildcards):
     if config["blast"] and (config["mito"] or config["nr"]):
         d["blast"] = rules.blast.output.tsv
     return d
+
+
+def tool_summaries():
+    """{tool: per-sample files} of the tools this run uses: each gets <tool>/<tool>_summary.tsv (rule tool_summary)"""
+    s, own = list(SAMPLES), [x for x in SAMPLES if x not in GIVEN_ASM]
+    mt_own = [x for x in SAMPLES if x not in GIVEN_MT]
+    steps = set(STEPS)
+    t = {}
+    with_reads = [x for x in s if x not in NO_READS]
+    if config["qc"] and with_reads:
+        t["fastp"] = expand(rules.fastp.output.json, sample=with_reads)
+    if config["mito"] and mt_own:
+        if config["meangs"]:
+            t["meangs"] = expand(rules.meangs.output.seed, sample=mt_own)
+        t["getorganelle"] = expand(rules.mt_iterate.output.status, sample=mt_own)
+        t["mitogenome"] = expand(rules.mt_select.output.status, sample=mt_own)
+    if config["assembly"]:
+        t["spades"] = (expand(rules.spades.output.scaffolds, sample=own) if "genome" in MODES else []) + \
+            [f for m in OTHER_MODES for f in expand(rules.spades_mode.output.fasta, sample=s, mode=m)]
+        if not STEPS or steps & {"busco", "transcriptome", "nuclear"}:
+            t["busco"] = (expand(rules.busco.output.summary, sample=s) if "genome" in MODES else []) + \
+                [f for m in OTHER_MODES for f in expand(rules.busco_assembly.output.summary, sample=s, asm=m)]
+    if steps & {"trinity", "transcriptome"}:
+        t["trinity"] = expand(rules.trinity.output.fasta, sample=s)
+        if steps & {"busco", "transcriptome"}:
+            t.setdefault("busco", []).extend(expand(rules.busco_assembly.output.summary, sample=s, asm="trinity"))
+    if config["genome_size"]:
+        t["genomescope"] = expand(rules.genomescope.output.summary, sample=s)
+    if config["annotate"] and config["mito"]:
+        t["mitom"] = expand(rules.mitom_annotate.output.gb, sample=s)
+    if config["nr"]:
+        t["rdna"] = expand(rules.getorganelle_nr.output.fasta, sample=s)
+        t["histone"] = expand(rules.getorganelle_histone.output.fasta, sample=s)
+    return {k: v for k, v in t.items() if v}
+
+
+def tool_summary_targets():
+    return [f"{OUT}{tool}/{tool}_summary.tsv" for tool in tool_summaries()]

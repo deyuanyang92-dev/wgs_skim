@@ -50,30 +50,31 @@ rule compare_sample:
     input:
         ref=lambda w: RUN[w.sample]["ref"],
     output:
-        tsv=OUT / "{sample}.compare.tsv",
+        tsv=OUT / "{sample}" / "{sample}.compare.tsv",
     params:
         args=args,
         path=f"export PATH={TOOLS}:$PATH; " if TOOLS else "",
+        out=lambda w: OUT / w.sample,
     log:
-        OUT / "logs" / "{sample}.log",
+        OUT / "pipeline_info" / "logs" / "{sample}.log",
     benchmark:
-        OUT / "benchmarks" / "{sample}.tsv"
+        OUT / "pipeline_info" / "benchmarks" / "{sample}.tsv"
     threads: 4
     resources:
         mem_mb=8000,                              # the SPAdes assembly graph of the circularization (~7 GB)
     shell:
-        "{params.path}python {CMP} {params.args} -o {OUT} --prefix {wildcards.sample} > {log} 2>&1"
+        "{params.path}python {CMP} {params.args} -o {params.out} --prefix {wildcards.sample} > {log} 2>&1"
 
 
 rule merge:
     input:
-        expand(OUT / "{sample}.compare.tsv", sample=list(RUN)),
+        expand(OUT / "{sample}" / "{sample}.compare.tsv", sample=list(RUN)),
     output:
         OUT / "all.compare.tsv",
     params:
         samples=",".join(RUN),
         skipped=" ".join(f"'{x}'" for x in SKIPPED),
     log:
-        OUT / "logs" / "merge.log",
+        OUT / "pipeline_info" / "logs" / "merge.log",
     shell:
         "python {CMP} --merge '{params.samples}' --skipped {params.skipped} -o {OUT} > {log} 2>&1"

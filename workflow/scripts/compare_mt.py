@@ -391,8 +391,16 @@ def write_tables(out, prefix, summaries, diffs, structs, gene_rows):
 # MEANGS (02.organelle/01.MEANGS_results) is not compared: it only gives GetOrganelle its seed (user, 2026-10-28).
 LAYOUTS = {
     "wgs_skim": {                                   # `wgs_skim run` with the mitogenome and spades-mitofinder steps
+        "samples": "getorganelle/*",
+        "ref": "getorganelle/{s}/{round}",          # the GetOrganelle round mt_iterate chose (its graph too)
+        "other": ["mitofinder=mitofinder_spades/{s}/{s}.mitofinder.fasta"],
+        "spades": "spades/{s}/spades",
+        "graph_for": "mitofinder",
+        "gb": "mitom/{s}/{s}.mt.gb",
+    },
+    "wgs_skim_0.1": {                               # results of wgs_skim <= 0.1 (directories by data type)
         "samples": "mito/*",
-        "ref": "mito/{s}/{round}",                  # the GetOrganelle round mt_iterate chose (its graph too)
+        "ref": "mito/{s}/{round}",
         "other": ["mitofinder=mitofinder/spades/{s}/{s}.mitofinder.fasta"],
         "spades": "assembly/{s}/spades",
         "graph_for": "mitofinder",
@@ -461,7 +469,7 @@ def merge(out, samples, skipped=()):
     tables = {"compare": [], "diffs": [], "structure": [], "genes": []}
     for smp in samples:
         for name in tables:
-            f = out / f"{smp}.{name}.tsv"
+            f = out / smp / f"{smp}.{name}.tsv"           # batch: one directory per sample
             tables[name] += read_tsv(f)
     tables["compare"] += [{"sample": smp, "verdict": "skipped", "note": why} for smp, why in skipped]
     write_tables(out, "all", tables["compare"], tables["diffs"], tables["structure"], tables["genes"])
@@ -485,7 +493,7 @@ def overview(out, summaries):
         + "</tr>" for r in summaries)
     figs = ""
     for r in summaries:
-        f = out / f"{r['sample']}.{r.get('other', '')}.compare.svg"
+        f = out / r["sample"] / f"{r['sample']}.{r.get('other', '')}.compare.svg"
         if r.get("other") and f.exists():
             figs += f'<h3>{escape(r["sample"])} - {escape(r["other"])}</h3>' + f.read_text()
     (out / "all.compare.html").write_text(

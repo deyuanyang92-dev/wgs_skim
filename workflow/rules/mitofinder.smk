@@ -1,35 +1,38 @@
 # MitoFinder: the mitochondrial contigs found in (and annotated from) an assembly, for every sample. Sources
-# (mitofinder_assembly, several allowed; results per source: mitofinder/<source>/<sample>/):
+# (mitofinder_assembly, several allowed). Results per source, one directory each:
+#   mitofinder_<source>/<sample>/   one sample's MitoFinder result
+#   mitofinder_<source>/            mitofinder_summary.tsv, mitofinder_contigs.tsv, genes/, contigs/, contamination/
 #   spades      the SPAdes whole-genome assembly           (combination spades-mitofinder)
-#   rna         the rnaSPAdes transcripts                  (combination rnaspades-mitofinder: mt genes from RNA-seq)
+#   rnaspades   the rnaSPAdes transcripts                  (combination rnaspades-mitofinder: mt genes from RNA-seq)
 #   trinity     the Trinity transcripts                    (combination trinity-mitofinder)
-#   given       an assembly made elsewhere (sheet column scaffolds, wgs_skim mitofinder -i)
+#   assembly    an assembly made elsewhere (sheet column scaffolds, wgs_skim mitofinder -i)
 #   megahit / metaspades   MitoFinder assembles the reads itself (the first mitofinder_max_pairs read pairs)
 # Reference (-r): mitofinder_ref, else the sample's own MitoM annotation of the GetOrganelle mitogenome (as the
 # user's mitofinder-batch runs did). MitoFinder 1.4.2 from a Singularity image (mitofinder_sif; bioconda 1.4.1
 # runs its circularization check without arguments, so its "Circularization" is meaningless - docs/tools/MitoFinder.md).
-MF_SOURCES = ["spades", "rna", "trinity", "given", "megahit", "metaspades"]
-MF_TRANSCRIPTS = {"rna", "trinity"}
+MF_SOURCES = ["spades", "rnaspades", "trinity", "assembly", "megahit", "metaspades"]
+MF_ALIAS = {"rna": "rnaspades", "given": "assembly"}            # names of wgs_skim <= 0.1
+MF_TRANSCRIPTS = {"rnaspades", "trinity"}
 
 
 def mitofinder_sources(sample):
     """the sources MitoFinder runs on for this sample"""
-    asked = [x.strip() for x in str(config["mitofinder_assembly"]).split(",") if x.strip()]
+    asked = [MF_ALIAS.get(x.strip(), x.strip()) for x in str(config["mitofinder_assembly"]).split(",") if x.strip()]
     for x in asked:
         if x not in MF_SOURCES:
             raise WorkflowError(f"unknown mitofinder_assembly '{x}'; choose from: {', '.join(MF_SOURCES)}")
     if not asked:                                       # automatic: what this run assembles
         want = set(STEPS)
         if sample in GIVEN_ASM:
-            asked = ["given"]
+            asked = ["assembly"]
         elif want & {"rnaspades", "transcriptome", "trinity"} and "spades" not in want:
-            asked = [x for x, steps in (("rna", {"rnaspades", "transcriptome"}),
+            asked = [x for x, steps in (("rnaspades", {"rnaspades", "transcriptome"}),
                                         ("trinity", {"trinity", "transcriptome"})) if want & steps]
         else:
             asked = ["spades"] if config["assembly"] else ["megahit"]
     if sample in GIVEN_ASM:                             # a given assembly stands in for the SPAdes one
-        asked = ["given" if x == "spades" else x for x in asked]
-    return list(dict.fromkeys(x for x in asked if x != "given" or sample in GIVEN_ASM))
+        asked = ["assembly" if x == "spades" else x for x in asked]
+    return list(dict.fromkeys(x for x in asked if x != "assembly" or sample in GIVEN_ASM))
 
 
 def mitofinder_targets(pattern):
@@ -47,9 +50,9 @@ def mitofinder_ref(wildcards):
 
 def mitofinder_assembly(wildcards):
     s, src = wildcards.sample, wildcards.src
-    if src in ("spades", "given"):
-        return rules.spades.output.scaffolds.format(sample=s)
-    if src == "rna":
+    if src in ("spades", "assembly"):
+        return scaffolds_of(s)
+    if src == "rnaspades":
         return rules.spades_mode.output.fasta.format(sample=s, mode="rna")
     return rules.trinity.output.fasta.format(sample=s)
 
@@ -67,8 +70,8 @@ rule mitofinder_input:
         asm=mitofinder_assembly,
         ref=mitofinder_ref,
     output:
-        fasta=temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta"),
-        places=temp(f"{OUT}mitofinder/{{src}}/{{sample}}/input.fasta.map.tsv"),
+        fasta=temp(f"{OUT}mitofinder_{{src}}/{{sample}}/input.fasta"),
+        places=temp(f"{OUT}mitofinder_{{src}}/{{sample}}/input.fasta.map.tsv"),
     params:
         min_len=lambda w: mitofinder_min_contig(w.src),
         factor=lambda w: 0 if w.src in MF_TRANSCRIPTS else config["mitofinder_cov_factor"],
@@ -77,12 +80,12 @@ rule mitofinder_input:
         concat=lambda w: (f"--concat --code {config['genetic_code']} --name {w.sample}_mt_transcripts"
                           if w.src in MF_TRANSCRIPTS and config["mitofinder_concat_transcripts"] else ""),
     log:
-        f"{OUT}logs/mitofinder/{{src}}/{{sample}}.input.log",
+        f"{OUT}pipeline_info/logs/mitofinder_{{src}}/{{sample}}.input.log",
     threads: 4
     resources:
         mem_mb=4000,
     wildcard_constraints:
-        src="spades|given|rna|trinity",
+        src="spades|assembly|rnaspades|trinity",
     conda:
         "../envs/blast.yaml"
     shell:
@@ -94,8 +97,7 @@ def mitofinder_inputs(wildcards):
     s, src = wildcards.sample, wildcards.src
     d = {"ref": mitofinder_ref(wildcards)}
     if src in ("megahit", "metaspades"):
-        d.update(r1=rules.fastp.output.r1.format(sample=s), r2=rules.fastp.output.r2.format(sample=s),
-                 json=rules.fastp.output.json.format(sample=s))
+        d.update(clean_reads(wildcards))
     else:
         d["assembly"] = rules.mitofinder_input.output.fasta.format(src=src, sample=s)
         d["places"] = rules.mitofinder_input.output.places.format(src=src, sample=s)
@@ -113,8 +115,8 @@ rule mitofinder:
     input:
         unpack(mitofinder_inputs),
     output:
-        fasta=f"{OUT}mitofinder/{{src}}/{{sample}}/{{sample}}.mitofinder.fasta",
-        gb=f"{OUT}mitofinder/{{src}}/{{sample}}/{{sample}}.mitofinder.gb",
+        fasta=f"{OUT}mitofinder_{{src}}/{{sample}}/{{sample}}.mitofinder.fasta",
+        gb=f"{OUT}mitofinder_{{src}}/{{sample}}/{{sample}}.mitofinder.gb",
     params:
         out=lambda w, output: str(Path(output.fasta).parent),
         data=lambda w, input: (f"-1 {input.r1} -2 {input.r2} --assembler {w.src}" if "r1" in input.keys()
@@ -127,9 +129,9 @@ rule mitofinder:
     resources:
         mem_mb=mitofinder_mem_mb,
     log:
-        f"{OUT}logs/mitofinder/{{src}}/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/mitofinder_{{src}}/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/mitofinder/{{src}}/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/mitofinder_{{src}}/{{sample}}.tsv"
     threads: 8
     wildcard_constraints:
         src="|".join(MF_SOURCES),
@@ -147,12 +149,12 @@ rule mitofinder_summary:
         lambda w: [rules.mitofinder.output.fasta.format(src=w.src, sample=s) for s in SAMPLES
                    if w.src in mitofinder_sources(s)],
     output:
-        tsv=f"{OUT}mitofinder/{{src}}/mitofinder_summary.tsv",
+        tsv=f"{OUT}mitofinder_{{src}}/mitofinder_summary.tsv",
     params:
         dirs=lambda w, input: [str(Path(f).parent) for f in input],
         version="1.4.2 (Singularity)" if config["mitofinder_sif"] else "1.4.1 (bioconda: circularization not checked)",
     log:
-        f"{OUT}logs/mitofinder/{{src}}/summary.log",
+        f"{OUT}pipeline_info/logs/mitofinder_{{src}}/summary.log",
     resources:
         mem_mb=1000,
     wildcard_constraints:
@@ -171,9 +173,9 @@ rule mitofinder_blast:
     input:
         tsv=rules.mitofinder_summary.output.tsv,
     output:
-        samples=f"{OUT}mitofinder/{{src}}/blast/samples_check.tsv",
-        genes=f"{OUT}mitofinder/{{src}}/blast/genes_check.tsv",
-        hits=f"{OUT}mitofinder/{{src}}/blast/blast_topn.tsv",
+        samples=f"{OUT}mitofinder_{{src}}/contamination/samples_check.tsv",
+        genes=f"{OUT}mitofinder_{{src}}/contamination/genes_check.tsv",
+        hits=f"{OUT}mitofinder_{{src}}/contamination/blast_topn.tsv",
     params:
         genes_dir=lambda w, input: str(Path(input.tsv).parent / "genes"),
         out=lambda w, output: str(Path(output.samples).parent),
@@ -183,9 +185,9 @@ rule mitofinder_blast:
         topn=config["blast_topn"],
         min_pident=config["mitofinder_min_pident"],
     log:
-        f"{OUT}logs/mitofinder/{{src}}/blast.log",
+        f"{OUT}pipeline_info/logs/mitofinder_{{src}}/blast.log",
     benchmark:
-        f"{OUT}benchmarks/mitofinder/{{src}}/blast.tsv"
+        f"{OUT}pipeline_info/benchmarks/mitofinder_{{src}}/blast.tsv"
     threads: 8
     resources:
         mem_mb=48000,                     # a local nt / marker database is memory-mapped (as rule blast)

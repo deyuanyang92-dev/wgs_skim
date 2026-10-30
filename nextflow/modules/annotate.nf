@@ -63,33 +63,33 @@ process MITOM_ANNOTATE {
     path db             // MITOM_DB output, or [] when both mitom_dir and mitos_refdir are given
 
     output:
-    tuple val(s), path("annotation/${s}/${s}.mt.gb"), emit: gb
-    path "annotation/${s}/${s}.mitom.tsv"
-    path "annotation/${s}/mitom", optional: true
-    path "logs/mitom/${s}.log"
+    tuple val(s), path("mitom/${s}/${s}.mt.gb"), emit: gb
+    path "mitom/${s}/${s}.mitom.tsv"
+    path "mitom/${s}/mitom", optional: true
+    path "pipeline_info/logs/mitom/${s}.log"
 
     script:
     def c = cfg()
-    def wd = "annotation/${s}/mitom"
+    def wd = "mitom/${s}/mitom"
     def refdir = c.mitos_refdir ?: "\$PWD/${db}/mitos_refs"
     def mitom = c.mitom_dir ?: "\$PWD/${db}/Mitom"
-    def log = "logs/mitom/${s}.log"
+    def log = "pipeline_info/logs/mitom/${s}.log"
     """
-    mkdir -p annotation/${s} logs/mitom
-    if [ ! -s ${fasta} ]; then echo "no mitogenome" > ${log}; : > annotation/${s}/${s}.mt.gb; : > annotation/${s}/${s}.mitom.tsv; exit 0; fi
+    mkdir -p mitom/${s} pipeline_info/logs/mitom
+    if [ ! -s ${fasta} ]; then echo "no mitogenome" > ${log}; : > mitom/${s}/${s}.mt.gb; : > mitom/${s}/${s}.mitom.tsv; exit 0; fi
     rm -rf ${wd}; mkdir -p ${wd}
     # record IDs "S|mt|1" -> "S_mt_1" (topology matches the annotation to the sequence by content)
     awk '{if (substr(\$0, 1, 1) == ">") {sub(" .*", ""); gsub("[^A-Za-z0-9_.>-]", "_")} print}' ${fasta} > ${wd}/input.fasta
     python ${mitom}/mitom run -i ${wd}/input.fasta -o ${wd}/out --clade ${c.clade} \\
         --genetic_code ${c.genetic_code} --threads ${task.cpus} --max_tasks 1 --id_maxlen 100 \\
         --mitos_refdir ${refdir} > ${log} 2>&1
-    cp ${wd}/out/final_annotation_all.gb annotation/${s}/${s}.mt.gb
-    cp ${wd}/out/summary.tsv annotation/${s}/${s}.mitom.tsv
+    cp ${wd}/out/final_annotation_all.gb mitom/${s}/${s}.mt.gb
+    cp ${wd}/out/summary.tsv mitom/${s}/${s}.mitom.tsv
     """
 
     stub:
     """
-    mkdir -p annotation/${s}/mitom logs/mitom
-    touch annotation/${s}/${s}.mt.gb annotation/${s}/${s}.mitom.tsv logs/mitom/${s}.log
+    mkdir -p mitom/${s}/mitom pipeline_info/logs/mitom
+    touch mitom/${s}/${s}.mt.gb mitom/${s}/${s}.mitom.tsv pipeline_info/logs/mitom/${s}.log
     """
 }

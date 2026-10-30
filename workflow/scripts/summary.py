@@ -1,4 +1,6 @@
-"""Collect per-sample results into summary/samples.tsv and summary/report.html (Snakemake script for rule summary)."""
+"""Summary tables (Snakemake script):
+  rule summary       every tool, one row per sample -> summary/samples.tsv + summary/report.html
+  rule tool_summary  one tool, one row per sample (and assembly) -> <tool>/<tool>_summary.tsv (tool_table)"""
 import csv
 import html
 import json
@@ -59,7 +61,65 @@ def gene_count(path):
     return {k: len(re.findall(rf"^ {{5}}{k} ", t, re.M)) for k in ("CDS", "tRNA", "rRNA")}
 
 
+def busco_fields(line):
+    """{complete, single, duplicated, fragmented, missing, n} of a BUSCO short-summary line"""
+    m = re.search(r"C:([\d.]+)%\[S:([\d.]+)%,D:([\d.]+)%\],F:([\d.]+)%,M:([\d.]+)%,n:(\d+)", line or "")
+    keys = ["complete_pct", "single_pct", "duplicated_pct", "fragmented_pct", "missing_pct", "n_genes"]
+    return dict(zip(keys, m.groups())) if m else dict.fromkeys(keys, "")
+
+
+def assembly_stats(path):
+    lens = fasta_lengths(path) if Path(path).exists() and Path(path).stat().st_size else []
+    return {"sequences": len(lens), "total_bp": sum(lens), "n50": n50(lens), "longest": max(lens, default="")}
+
+
+def sample_of(f):
+    return Path(f).parent.name
+
+
+def tool_table(tool, files):
+    """(columns, rows) of <tool>/<tool>_summary.tsv from that tool's per-sample files"""
+    rows = []
+    for f in files:
+        s, p = sample_of(f), Path(f)
+        if tool == "fastp":
+            j = json.load(open(p))
+            b, a = j["summary"]["before_filtering"], j["summary"]["after_filtering"]
+            rows.append({"sample": s, "raw_reads": b["total_reads"], "raw_gb": f"{b['total_bases'] / 1e9:.3f}",
+                         "clean_reads": a["total_reads"], "clean_gb": f"{a['total_bases'] / 1e9:.3f}",
+                         "q30_pct": f"{a['q30_rate'] * 100:.1f}", "gc_pct": f"{a['gc_content'] * 100:.1f}",
+                         "adapter_trimmed_reads": j.get("adapter_cutting", {}).get("adapter_trimmed_reads", "")})
+        elif tool == "meangs":
+            rows.append({"sample": s, **{k: v for k, v in assembly_stats(p).items() if k in ("sequences", "total_bp")}})
+        elif tool in ("getorganelle", "mitogenome"):
+            j = json.load(open(p))
+            rows.append({"sample": s, "length": j.get("length", ""), "circular": j.get("circular", ""),
+                         "sequences": j.get("n_sequences", ""), "round": j.get("round", ""),
+                         "rounds_run": j.get("rounds_run", ""), "stop": j.get("stop", ""),
+                         "source": j.get("source", ""), "note": j.get("note", "")})
+        elif tool in ("spades", "trinity", "rdna", "histone"):
+            asm = p.name[len(s) + 1:].rsplit(".fasta", 1)[0]          # scaffolds, rna, meta, trinity, nr, histone
+            rows.append({"sample": s, "assembly": asm, **assembly_stats(p)})
+        elif tool == "busco":
+            asm = p.name[len(s) + 1:].replace("busco.txt", "").rstrip(".") or "scaffolds"
+            line = busco_line(p) if p.stat().st_size else ""
+            rows.append({"sample": s, "assembly": asm, **busco_fields(line), "busco": line})
+        elif tool == "genomescope":
+            size, het, err = genomescope(p)
+            rows.append({"sample": s, "genome_size_mb": size, "heterozygosity_pct": het,
+                         "read_error_pct": "" if err is None else err})
+        elif tool == "mitom":
+            g = gene_count(p)
+            rows.append({"sample": s, "protein_genes": g["CDS"], "rRNAs": g["rRNA"], "tRNAs": g["tRNA"]})
+    cols = list(dict.fromkeys(k for r in rows for k in r)) or ["sample"]
+    return cols, rows
+
+
 def main(sm):
+    if sm.rule == "tool_summary":
+        cols, rows = tool_table(sm.wildcards.tool, list(sm.input))
+        write_tsv(sm.output.tsv, rows, cols)
+        return
     inp = sm.input
     samples = sm.params.samples
     cols = ["sample", "clean_gb", "q30", "mt_length", "mt_circular", "mt_source", "mt_genes", "mt_topology",

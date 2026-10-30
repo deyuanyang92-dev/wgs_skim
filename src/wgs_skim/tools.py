@@ -84,10 +84,9 @@ def _mitofinder_conf(a, conf, fasta):
     bad = [x for x in asm if x not in MF_ASSEMBLERS]
     if bad:
         sys.exit(f"[wgs_skim] unknown --assembler {', '.join(bad)}: {' '.join(MF_ASSEMBLERS)}")
-    src = {"rnaspades": "rna"}                      # MitoFinder source names (rules/mitofinder.smk)
     conf.update(mitofinder_blast=not a.no_check, blast_db=a.db, mitofinder_ref=merged_ref(a.ref, a.outdir_path),
                 mitofinder_trna=a.trna,
-                mitofinder_assembly="given" if fasta else ",".join(src.get(x, x) for x in asm))
+                mitofinder_assembly="assembly" if fasta else ",".join(asm))
     if not fasta:                                   # the assemblers that are workflow steps run first
         return ",".join(["mitofinder"] + [x for x in asm if x in ("spades", "rnaspades", "trinity")])
 
@@ -105,20 +104,20 @@ def _blast_conf(a, conf, fasta):
 
 
 TOOLS = {t.name: t for t in [
-    Tool("fastp", "reads", "clean reads (adapters, quality) and their report -> qc/<s>/", "fastp"),
-    Tool("meangs", "reads", "MEANGS mitochondrial seed -> mito/<s>/meangs/", "meangs"),
-    Tool("getorganelle", "reads", "GetOrganelle: mitogenome (reseeded rounds until circular) or rDNA + histones",
+    Tool("fastp", "reads", "clean reads (adapters, quality) and their report -> fastp/<s>/, fastp/fastp_summary.tsv", "fastp"),
+    Tool("meangs", "reads", "MEANGS mitochondrial seed -> meangs/<s>/", "meangs"),
+    Tool("getorganelle", "reads", "GetOrganelle: mitogenome (reseeded rounds until circular; getorganelle/<s>/, mitogenome/<s>/) or rDNA + histones (rdna/, histone/)",
          "getorganelle", options=_getorganelle_opts, configure=_getorganelle_conf),
-    Tool("spades", "reads", "SPAdes in any mode (genome rna meta plasmid ...) -> assembly/<s>/", "spades",
+    Tool("spades", "reads", "SPAdes in any mode (genome rna meta plasmid ...) -> spades/<s>/", "spades",
          options=_spades_opts, configure=_spades_conf),
-    Tool("trinity", "reads", "Trinity transcriptome -> assembly/<s>/<s>.trinity.fasta", "trinity"),
-    Tool("genome-size", "reads", "jellyfish k-mers + GenomeScope2: genome size, heterozygosity -> genome_size/<s>/",
+    Tool("trinity", "reads", "Trinity transcriptome -> trinity/<s>/<s>.trinity.fasta", "trinity"),
+    Tool("genome-size", "reads", "jellyfish k-mers + GenomeScope2: genome size, heterozygosity -> genomescope/<s>/",
          "genome_size"),
-    Tool("busco", "fasta", "BUSCO completeness of assemblies / transcriptomes / proteins -> assembly/<s>/<s>.busco.txt",
+    Tool("busco", "fasta", "BUSCO completeness of assemblies / transcriptomes / proteins -> busco/<s>/, busco/busco_summary.tsv",
          "busco", "scaffolds", _busco_opts, _busco_conf),
     Tool("mitofinder", "both", "MitoFinder: the mitogenome in assemblies (-i) or MitoFinder's own assembly of reads "
-         "(-r)", "mitofinder", "scaffolds", _mitofinder_opts, _mitofinder_conf),
-    Tool("mitom", "fasta", "MitoM annotation of mitogenomes (genes, rRNA, tRNA; NCBI checks) -> annotation/<s>/",
+         "(-r) -> mitofinder_<source>/<s>/, mitofinder_<source>/mitofinder_summary.tsv", "mitofinder", "scaffolds", _mitofinder_opts, _mitofinder_conf),
+    Tool("mitom", "fasta", "MitoM annotation of mitogenomes (genes, rRNA, tRNA; NCBI checks) -> mitom/<s>/",
          "annotate"),
     Tool("blast", "fasta", "BLAST sequences against nt, top hits with GenBank taxonomy -> blast/blast_topn.tsv",
          "blast", options=_blast_opts, configure=_blast_conf),
@@ -126,12 +125,12 @@ TOOLS = {t.name: t for t in [
 
 
 def fasta_sheet(inputs, out, column, split_by_id=False, only=None):
-    """sample sheet of FASTA inputs (no reads): <out>/.wgs_skim/inputs.tsv (sample = file name, or the first word of
+    """sample sheet of FASTA inputs (no reads): <out>/pipeline_info/inputs/inputs.tsv (sample = file name, or the first word of
     the headers with split_by_id)"""
     if str(scripts_dir()) not in sys.path:
         sys.path.insert(0, str(scripts_dir()))
     from samples import fasta_samples
-    meta = Path(out) / ".wgs_skim"
+    meta = Path(out) / "pipeline_info" / "inputs"
     fastas = fasta_samples(inputs, meta / "split", split_by_id)
     if only:
         fastas = {k: v for k, v in fastas.items() if k in only.split(",")}
@@ -154,7 +153,7 @@ def merged_ref(refs, out):
         sys.exit(f"[wgs_skim] reference GenBank not found: {', '.join(missing) or ' '.join(refs)}")
     if len(files) == 1:
         return files[0].resolve()
-    dst = Path(out) / ".wgs_skim" / "mitofinder_refs.gb"
+    dst = Path(out) / "pipeline_info" / "inputs" / "mitofinder_refs.gb"
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text("".join(f.read_text().rstrip() + "\n" for f in files))
     print(f"[wgs_skim] {len(files)} reference GenBank files merged -> {dst}", flush=True)
@@ -174,6 +173,7 @@ def tool_config(a, out):
     conf = {"outdir": ".", "db_dir": HOME / "db", "taxon": a.taxon, "qc": True}
     if use_fasta:
         conf["samples"] = fasta_sheet(a.input, out, t.column, a.split_by_id, a.only)
+        conf["qc"] = False                            # no reads
     else:
         conf["reads_dir"] = Path(a.reads_dir).resolve() if a.reads_dir else None
         conf["samples"] = Path(a.samples).resolve() if a.samples else None

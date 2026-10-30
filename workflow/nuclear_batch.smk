@@ -63,9 +63,9 @@ rule assemble:
         reads=lambda w, input: f"-1 {input.reads[0]} -2 {input.reads[1]}" if input.reads else "",
         out=lambda w, output: str(Path(output.done).parent),
     log:
-        OUT / "logs" / "assemble" / "{kind}" / "{sample}.log",
+        OUT / "pipeline_info" / "logs" / "assemble" / "{kind}" / "{sample}.log",
     benchmark:
-        OUT / "benchmarks" / "assemble" / "{kind}" / "{sample}.tsv"
+        OUT / "pipeline_info" / "benchmarks" / "assemble" / "{kind}" / "{sample}.tsv"
     threads: 16
     resources:
         mem_mb=int(max(8, 1.2 * max(float(x) for x in MAX_GB.split(",") if x)) * 1024),
@@ -86,9 +86,9 @@ rule annotate:
         go=lambda w, input: str(Path(input.done).parent),
         out=lambda w, output: str(Path(output.stamp).parent),
     log:
-        OUT / "logs" / "annotate" / "{kind}" / "{sample}.log",
+        OUT / "pipeline_info" / "logs" / "annotate" / "{kind}" / "{sample}.log",
     benchmark:
-        OUT / "benchmarks" / "annotate" / "{kind}" / "{sample}.tsv"
+        OUT / "pipeline_info" / "benchmarks" / "annotate" / "{kind}" / "{sample}.tsv"
     threads: 4
     resources:
         mem_mb=2000,
@@ -109,9 +109,9 @@ rule spades_mitom:
         out=lambda w, output: str(Path(output.stamp).parent),
         kinds=",".join(MARKERS),
     log:
-        OUT / "logs" / "spades_mitom" / "{sample}.log",
+        OUT / "pipeline_info" / "logs" / "spades_mitom" / "{sample}.log",
     benchmark:
-        OUT / "benchmarks" / "spades_mitom" / "{sample}.tsv"
+        OUT / "pipeline_info" / "benchmarks" / "spades_mitom" / "{sample}.tsv"
     threads: 12
     resources:
         mem_mb=8000,
@@ -141,7 +141,7 @@ rule compare:
         spades=lambda w: f"--spades {spades_mitom(w.sample)}" if spades_mitom(w.sample) else "",
         markers=",".join(MARKERS),
     log:
-        OUT / "logs" / "compare" / "{sample}.log",
+        OUT / "pipeline_info" / "logs" / "compare" / "{sample}.log",
     resources:
         mem_mb=1000,
     conda:
@@ -158,7 +158,7 @@ rule summary:
     output:
         OUT / "summary.tsv",
     log:
-        OUT / "logs" / "summary.log",
+        OUT / "pipeline_info" / "logs" / "summary.log",
     resources:
         mem_mb=1000,
     shell:

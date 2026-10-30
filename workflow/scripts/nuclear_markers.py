@@ -306,10 +306,14 @@ def write_rows(path, rows):
 # of rule nuc_markers is reused); wgs_skim_pipeline: Temp_scripts/wgs_skim_pipeline (01.fastp, 02.organelle/03_nr,
 # 03.spades).
 LAYOUTS = {
-    "wgs_skim": {"samples": "qc/*", "r1": "qc/{s}/{s}.R1.fq.gz", "r2": "qc/{s}/{s}.R2.fq.gz",
+    "wgs_skim": {"samples": "rdna/*", "r1": "fastp/{s}/{s}.R1.fq.gz", "r2": "fastp/{s}/{s}.R2.fq.gz",
                  "rdna": "rdna/{s}/getorganelle", "histone": "histone/{s}/getorganelle",
-                 "scaffolds": "assembly/{s}/{s}.scaffolds.fasta",
-                 "spades_mitom": "nuclear/{s}/mitom_nuc"},
+                 "scaffolds": "spades/{s}/{s}.scaffolds.fasta",
+                 "spades_mitom": "nuclear_markers/{s}/mitom_nuc"},
+    "wgs_skim_0.1": {"samples": "qc/*", "r1": "qc/{s}/{s}.R1.fq.gz", "r2": "qc/{s}/{s}.R2.fq.gz",   # wgs_skim <= 0.1
+                     "rdna": "rdna/{s}/getorganelle", "histone": "histone/{s}/getorganelle",
+                     "scaffolds": "assembly/{s}/{s}.scaffolds.fasta",
+                     "spades_mitom": "nuclear/{s}/mitom_nuc"},
     "wgs_skim_pipeline": {"samples": "01.fastp/*", "r1": "01.fastp/{s}/{s}.R1.clean.fastq.gz",
                           "r2": "01.fastp/{s}/{s}.R2.clean.fastq.gz", "rdna": "02.organelle/03_nr/{s}",
                           "scaffolds": "03.spades/{s}/scaffolds.fasta"},

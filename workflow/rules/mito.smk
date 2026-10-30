@@ -8,7 +8,7 @@ rule getorganelle_db:
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/getorganelle_db.log",
+        f"{OUT}pipeline_info/logs/getorganelle_db.log",
     conda:
         "../envs/getorganelle.yaml"
     shell:
@@ -18,10 +18,9 @@ rule getorganelle_db:
 rule meangs:
     """MEANGS finds a mitochondrial seed; an empty seed file means GetOrganelle falls back to its animal_mt seeds."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
+        unpack(clean_reads),
     output:
-        seed=f"{OUT}mito/{{sample}}/meangs/{{sample}}.seed.fasta",
+        seed=f"{OUT}meangs/{{sample}}/{{sample}}.seed.fasta",
     params:
         wd=lambda w, output: str(Path(output.seed).parent),
         cls=config["meangs_class"],
@@ -30,9 +29,9 @@ rule meangs:
     resources:
         mem_mb=12000,
     log:
-        f"{OUT}logs/meangs/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/meangs/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/meangs/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/meangs/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/meangs.yaml"
@@ -52,12 +51,11 @@ rule meangs:
 rule getorganelle_mt:
     """First GetOrganelle mitogenome assembly from the MEANGS seed (GetOrganelle's default read subsample)."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
+        unpack(clean_reads),
         seed=mt_seed,
         db=GETORG_DB,
     output:
-        done=f"{OUT}mito/{{sample}}/round0/.done",
+        done=f"{OUT}getorganelle/{{sample}}/round0/.done",
     params:
         out=lambda w, output: str(Path(output.done).parent),
         k=config["getorganelle_kmers"],
@@ -65,9 +63,9 @@ rule getorganelle_mt:
     resources:
         mem_mb=16000,
     log:
-        f"{OUT}logs/getorganelle_mt/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/getorganelle_mt/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/getorganelle_mt/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/getorganelle_mt/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -84,14 +82,12 @@ rule getorganelle_mt:
 rule mt_iterate:
     """Keep round 0 if circular; otherwise reseed GetOrganelle with the previous round, all reads (capped)."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
         round0=rules.getorganelle_mt.output.done,
         db=GETORG_DB,
     output:
-        fasta=f"{OUT}mito/{{sample}}/{{sample}}.getorganelle.fasta",
-        status=f"{OUT}mito/{{sample}}/{{sample}}.getorganelle.json",
+        fasta=f"{OUT}getorganelle/{{sample}}/{{sample}}.getorganelle.fasta",
+        status=f"{OUT}getorganelle/{{sample}}/{{sample}}.getorganelle.json",
     params:
         rounds=config["mt_iter_rounds"],
         R=config["mt_iter_R"],
@@ -100,9 +96,9 @@ rule mt_iterate:
     resources:
         mem_mb=MT_ITER_MEM,
     log:
-        f"{OUT}logs/mt_iterate/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/mt_iterate/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/mt_iterate/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/mt_iterate/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -115,14 +111,14 @@ rule mt_select:
     input:
         unpack(mt_select_inputs),
     output:
-        fasta=f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta",
-        status=f"{OUT}mito/{{sample}}/{{sample}}.mt.json",
+        fasta=f"{OUT}mitogenome/{{sample}}/{{sample}}.mt.fasta",
+        status=f"{OUT}mitogenome/{{sample}}/{{sample}}.mt.json",
     resources:
         mem_mb=2000,
     log:
-        f"{OUT}logs/mt_select/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/mt_select/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/mt_select/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/mt_select/{{sample}}.tsv"
     threads: 8
     wildcard_constraints:
         sample=one_of([x for x in SAMPLES if x not in GIVEN_MT]),
@@ -137,8 +133,8 @@ rule mt_given:
     input:
         lambda w: GIVEN[w.sample]["mitogenome"],
     output:
-        fasta=f"{OUT}mito/{{sample}}/{{sample}}.mt.fasta",
-        status=f"{OUT}mito/{{sample}}/{{sample}}.mt.json",
+        fasta=f"{OUT}pipeline_info/inputs/mitogenome/{{sample}}/{{sample}}.mt.fasta",
+        status=f"{OUT}pipeline_info/inputs/mitogenome/{{sample}}/{{sample}}.mt.json",
     wildcard_constraints:
         sample=one_of(GIVEN_MT),
     localrule: True

@@ -14,7 +14,7 @@ rule mitom_db:
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/mitom_db.log",
+        f"{OUT}pipeline_info/logs/mitom_db.log",
     conda:
         "../envs/mitom.yaml"
     shell:
@@ -39,7 +39,7 @@ rule mitom_nuc_db:
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/mitom_nuc_db.log",
+        f"{OUT}pipeline_info/logs/mitom_nuc_db.log",
     conda:
         "../envs/mitom.yaml"
     shell:
@@ -52,11 +52,11 @@ rule mitom_nuc_db:
 rule mitom_annotate:
     """MitoM annotation (protein genes, rRNAs, tRNAs; cox1 start; NCBI checks) of the final mitogenome."""
     input:
-        fasta=rules.mt_select.output.fasta,
+        fasta=lambda w: mt_of(w.sample),
         db=[] if config["mitom_dir"] and config["mitos_refdir"] else MITOM_DB,
     output:
-        gb=f"{OUT}annotation/{{sample}}/{{sample}}.mt.gb",
-        tsv=f"{OUT}annotation/{{sample}}/{{sample}}.mitom.tsv",
+        gb=f"{OUT}mitom/{{sample}}/{{sample}}.mt.gb",
+        tsv=f"{OUT}mitom/{{sample}}/{{sample}}.mitom.tsv",
     params:
         wd=lambda w, output: str(Path(output.gb).parent / "mitom"),
         refdir=lambda w, input: config["mitos_refdir"] or f"{MITOM_DB}/mitos_refs",
@@ -66,9 +66,9 @@ rule mitom_annotate:
     resources:
         mem_mb=4000,
     log:
-        f"{OUT}logs/mitom/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/mitom/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/mitom/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/mitom/{{sample}}.tsv"
     threads: 8
     conda:
         "../envs/mitom.yaml"

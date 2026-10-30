@@ -16,7 +16,7 @@ process TOPOLOGY {
     output:
     tuple val(s), path("topology/${s}/${s}.topology.tsv"), emit: tsv
     path "topology/${s}/*.circular.fasta", optional: true
-    path "logs/topology/${s}.log"
+    path "pipeline_info/logs/topology/${s}.log"
 
     script:
     def c = cfg()
@@ -24,17 +24,17 @@ process TOPOLOGY {
         input: [fasta: names(fastas), r1: "${r1}", r2: "${r2}",
                 annotation: annotation ? names(annotation)[0] : [], status: "${status}"],
         output: [tsv: "topology/${s}/${s}.topology.tsv"], params: [pairs: c.topology_pairs, mode: c.topology_mode],
-        log: ["logs/topology/${s}.log"], threads: task.cpus, wildcards: [sample: s], rule: 'topology')
+        log: ["pipeline_info/logs/topology/${s}.log"], threads: task.cpus, wildcards: [sample: s], rule: 'topology')
     """
-    mkdir -p topology/${s} logs/topology
+    mkdir -p topology/${s} pipeline_info/logs/topology
     ${spec}
     smk_shim.py snakemake.json ${scriptsDir()}/topology.py
     """
 
     stub:
     """
-    mkdir -p topology/${s} logs/topology
-    printf 'sample\\tcontig\\tverdict\\n' > topology/${s}/${s}.topology.tsv; touch logs/topology/${s}.log
+    mkdir -p topology/${s} pipeline_info/logs/topology
+    printf 'sample\\tcontig\\tverdict\\n' > topology/${s}/${s}.topology.tsv; touch pipeline_info/logs/topology/${s}.log
     """
 }
 
@@ -52,14 +52,14 @@ process BLAST {
     output:
     path "blast/blast_topn.tsv", emit: tsv
     path "blast/*"
-    path "logs/blast.log"
+    path "pipeline_info/logs/blast.log"
 
     script:
     def c = cfg()
     def spec = smkJson(input: nestInputs(meta), output: [tsv: 'blast/blast_topn.tsv'],
         params: [db: c.blast_db, topn: c.blast_topn, email: c.email, samples: meta.collect { it[1] }.unique().sort(),
                  mt: c.blast_mt_list, nr: c.blast_nr_list],
-        log: ['logs/blast.log'], threads: task.cpus, rule: 'blast')
+        log: ['pipeline_info/logs/blast.log'], threads: task.cpus, rule: 'blast')
     """
     mkdir -p blast logs
     ${nestLinks(meta)}
@@ -70,7 +70,7 @@ process BLAST {
     stub:
     """
     mkdir -p blast logs
-    printf 'qseqid\\tsacc\\tpident\\n' > blast/blast_topn.tsv; touch logs/blast.log
+    printf 'qseqid\\tsacc\\tpident\\n' > blast/blast_topn.tsv; touch pipeline_info/logs/blast.log
     """
 }
 
@@ -87,12 +87,12 @@ process SUMMARY {
     output:
     path "summary/samples.tsv", emit: tsv
     path "summary/report.html"
-    path "logs/summary.log"
+    path "pipeline_info/logs/summary.log"
 
     script:
     def spec = smkJson(input: nestInputs(meta, ['blast']),
         output: [tsv: 'summary/samples.tsv', html: 'summary/report.html'],
-        params: [samples: samples, taxon: cfg().taxon], log: ['logs/summary.log'], rule: 'summary')
+        params: [samples: samples, taxon: cfg().taxon], log: ['pipeline_info/logs/summary.log'], rule: 'summary')
     """
     mkdir -p summary logs
     ${nestLinks(meta)}
@@ -103,6 +103,6 @@ process SUMMARY {
     stub:
     """
     mkdir -p summary logs
-    printf 'sample\\n${samples.join('\\n')}\\n' > summary/samples.tsv; touch summary/report.html logs/summary.log
+    printf 'sample\\n${samples.join('\\n')}\\n' > summary/samples.tsv; touch summary/report.html pipeline_info/logs/summary.log
     """
 }

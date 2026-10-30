@@ -45,6 +45,8 @@ def cmd_run(args, passthrough):
             "busco_lineage": args.busco_lineage, "steps": args.steps,
             "blast_mt": args.blast_mt, "blast_nr": args.blast_nr, "spades_modes": args.spades_modes,
             "mitofinder_ref": merged_ref(args.mitofinder_ref, out) if args.mitofinder_ref else None}
+    if args.no_qc:                                    # the reads are already clean (e.g. fastp/ of an earlier run)
+        conf["qc"] = False
     run = nextflow if args.engine == "nextflow" else snakemake
     return run(conf, out, args.cores, job_mem_gb(args.mem_gb), args.conda_prefix, args.configfile, args.config,
                args.dry_run, passthrough)
@@ -210,6 +212,8 @@ def parser():
     r.add_argument("--blast-nr", metavar="Q[,Q]",
                    help="rDNA BLAST queries: full and/or 18S, ITS, ITS1, 5.8S, ITS2, 28S (default 18S,ITS,28S)")
     r.add_argument("--email", help="e-mail for NCBI Entrez (BLAST metadata)")
+    r.add_argument("--no-qc", action="store_true", help="the reads are already clean (e.g. the fastp/ directory of an "
+                   "earlier run): used as they are, no fastp, no copies")
     r.add_argument("--busco-lineage", help="BUSCO lineage name or downloaded lineage directory")
     common(r)
     r.set_defaults(func=cmd_run)

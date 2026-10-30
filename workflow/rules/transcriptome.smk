@@ -2,7 +2,7 @@
 # spadesv3.2.py / spadesv3.5.5.py (wgs, rna, meta, bio, sewage, plasmid, metaviral, metaplasmid; --careful,
 # --only-assembler, -k) and trinity_batch3.1.py (--full_cleanup). The genome mode is rule `spades` (assembly.smk:
 # its scaffolds feed BUSCO, the nuclear markers and the mitogenome); every other mode is rule spades_mode:
-#   config spades_modes: "genome,rna,meta"  ->  assembly/<s>/<s>.scaffolds.fasta, <s>.rna.fasta, <s>.meta.fasta
+#   config spades_modes: "genome,rna,meta"  ->  spades/<s>/<s>.scaffolds.fasta, <s>.rna.fasta, <s>.meta.fasta
 # BUSCO (rule busco_assembly): -m transcriptome for rna / rnaviral / trinity, -m genome otherwise.
 # Steps: spades (the modes), trinity, busco (all assemblies), rna = rnaSPAdes + Trinity + BUSCO.
 
@@ -47,11 +47,9 @@ def spades_extra(mode):
 rule spades_mode:
     """SPAdes in a non-genome mode (rna, meta, plasmid ...)"""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
     output:
-        fasta=f"{OUT}assembly/{{sample}}/{{sample}}.{{mode}}.fasta",
+        fasta=f"{OUT}spades/{{sample}}/{{sample}}.{{mode}}.fasta",
     params:
         out=lambda w, output: str(Path(output.fasta).parent / f"spades_{w.mode}"),
         flag=lambda w: SPADES_MODES[w.mode][0],
@@ -61,9 +59,9 @@ rule spades_mode:
     resources:
         mem_mb=mode_mem_mb(config["spades_mode_gib_per_gb"], 16),
     log:
-        f"{OUT}logs/spades_mode/{{sample}}.{{mode}}.log",
+        f"{OUT}pipeline_info/logs/spades_mode/{{sample}}.{{mode}}.log",
     benchmark:
-        f"{OUT}benchmarks/spades_mode/{{sample}}.{{mode}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/spades_mode/{{sample}}.{{mode}}.tsv"
     threads: 16
     wildcard_constraints:
         mode="|".join(SPADES_MODES),
@@ -91,20 +89,18 @@ rule spades_mode:
 rule trinity:
     """Trinity transcripts (--full_cleanup: only Trinity.fasta and its gene-to-transcript map stay)"""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
     output:
-        fasta=f"{OUT}assembly/{{sample}}/{{sample}}.trinity.fasta",
+        fasta=f"{OUT}trinity/{{sample}}/{{sample}}.trinity.fasta",
     params:
         out=lambda w, output: str(Path(output.fasta).parent / "trinity"),
         extra=config["trinity_extra"],
     resources:
         mem_mb=mode_mem_mb(config["trinity_gib_per_gb"], 16),
     log:
-        f"{OUT}logs/trinity/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/trinity/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/trinity/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/trinity/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/trinity.yaml"
@@ -121,10 +117,11 @@ rule trinity:
 rule busco_assembly:
     """BUSCO completeness of an assembly of another mode (-m transcriptome for RNA-seq assemblies)"""
     input:
-        fasta=f"{OUT}assembly/{{sample}}/{{sample}}.{{asm}}.fasta",
+        fasta=lambda w: (rules.trinity.output.fasta if w.asm == "trinity"
+                         else rules.spades_mode.output.fasta.replace("{mode}", w.asm)).format(sample=w.sample),
         lineage=busco_lineage_dir,
     output:
-        summary=f"{OUT}assembly/{{sample}}/{{sample}}.{{asm}}.busco.txt",
+        summary=f"{OUT}busco/{{sample}}/{{sample}}.{{asm}}.busco.txt",
     params:
         out=lambda w, output: str(Path(output.summary).parent),
         name=lambda w: f"busco_{w.asm}",
@@ -132,9 +129,9 @@ rule busco_assembly:
     resources:
         mem_mb=16000,
     log:
-        f"{OUT}logs/busco_assembly/{{sample}}.{{asm}}.log",
+        f"{OUT}pipeline_info/logs/busco_assembly/{{sample}}.{{asm}}.log",
     benchmark:
-        f"{OUT}benchmarks/busco_assembly/{{sample}}.{{asm}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/busco_assembly/{{sample}}.{{asm}}.tsv"
     threads: 16
     wildcard_constraints:
         asm="|".join(BUSCO_MODE),

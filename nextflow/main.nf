@@ -66,25 +66,25 @@ def needed(Map c, List st) {
 def existingResults(Map c, List samples) {
     def out = file(params.outdir)
     def have = { pattern -> samples.every { s -> out.resolve(pattern.replace('{s}', s)).exists() } }
-    c.mito = have('mito/{s}/{s}.mt.fasta')
+    c.mito = have('mitogenome/{s}/{s}.mt.fasta')
     c.nr = have('rdna/{s}/{s}.nr.fasta')
-    c.assembly = have('assembly/{s}/{s}.busco.txt')
-    c.nuc_markers = have('nuclear/{s}/{s}.copy_number.tsv')
-    c.genome_size = have('genome_size/{s}/{s}.genomescope.txt')
-    c.annotate = have('annotation/{s}/{s}.mt.gb')
+    c.assembly = have('busco/{s}/{s}.busco.txt')
+    c.nuc_markers = have('nuclear_markers/{s}/{s}.copy_number.tsv')
+    c.genome_size = have('genomescope/{s}/{s}.genomescope.txt')
+    c.annotate = have('mitom/{s}/{s}.mt.gb')
     c.topology_on = have('topology/{s}/{s}.topology.tsv')
     c.blast = out.resolve('blast/blast_topn.tsv').exists()
     def items = []
     def add = { key, pattern, on -> if (on) samples.each { s -> items << [key, s, out.resolve(pattern.replace('{s}', s))] } }
-    add('fastp', 'qc/{s}/{s}.fastp.json', true)
-    add('mt', 'mito/{s}/{s}.mt.json', c.mito)
-    add('mt_fasta', 'mito/{s}/{s}.mt.fasta', c.mito)
+    add('fastp', 'fastp/{s}/{s}.fastp.json', true)
+    add('mt', 'mitogenome/{s}/{s}.mt.json', c.mito)
+    add('mt_fasta', 'mitogenome/{s}/{s}.mt.fasta', c.mito)
     add('nr', 'rdna/{s}/{s}.nr.fasta', c.nr)
-    add('scaffolds', 'assembly/{s}/{s}.scaffolds.fasta', c.assembly)
-    add('busco', 'assembly/{s}/{s}.busco.txt', c.assembly)
-    add('nuclear', 'nuclear/{s}/{s}.copy_number.tsv', c.assembly && c.nuc_markers)
-    add('genomescope', 'genome_size/{s}/{s}.genomescope.txt', c.genome_size)
-    add('annotation', 'annotation/{s}/{s}.mt.gb', c.annotate && c.mito)
+    add('scaffolds', 'spades/{s}/{s}.scaffolds.fasta', c.assembly)
+    add('busco', 'busco/{s}/{s}.busco.txt', c.assembly)
+    add('nuclear', 'nuclear_markers/{s}/{s}.copy_number.tsv', c.assembly && c.nuc_markers)
+    add('genomescope', 'genomescope/{s}/{s}.genomescope.txt', c.genome_size)
+    add('annotation', 'mitom/{s}/{s}.mt.gb', c.annotate && c.mito)
     add('topology', 'topology/{s}/{s}.topology.tsv', c.topology_on && c.mito)
     if (c.blast && (c.mito || c.nr)) items << ['blast', '_', out.resolve('blast/blast_topn.tsv')]
     items

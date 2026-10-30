@@ -7,9 +7,7 @@ rule getorganelle_nr:
     """Nuclear rDNA (18S-ITS-28S) with GetOrganelle -F anonym and the bundled seed / label; rounds of at most
     nuclear_max_gb Gb of reads (5, then 10 seeded with round 1 when the unit does not close)."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
         seed=NR_SEED,
         label=NR_LABEL,
     output:
@@ -24,9 +22,9 @@ rule getorganelle_nr:
     resources:
         mem_mb=NUC_MEM,
     log:
-        f"{OUT}logs/getorganelle_nr/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/getorganelle_nr/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/getorganelle_nr/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/getorganelle_nr/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -55,9 +53,9 @@ rule nr_annotate:
     resources:
         mem_mb=2000,
     log:
-        f"{OUT}logs/nr_annotate/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/nr_annotate/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/nr_annotate/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/nr_annotate/{{sample}}.tsv"
     threads: 4
     conda:
         "../envs/mitom.yaml"
@@ -77,20 +75,20 @@ rule nuc_markers:
     """Multi-copy nuclear markers in the whole-genome assembly with `mitom nuc`: rDNA (18S, ITS1, 5.8S, ITS2, 28S)
     and histones (H1, H2A, H2B, H3, H4); every copy plus one consensus per gene (contigs used / dropped and why)."""
     input:
-        scaffolds=rules.spades.output.scaffolds,
+        scaffolds=lambda w: scaffolds_of(w.sample),
         db=[] if config["mitom_dir"] else MITOM_NUC_DB,
     output:
-        features=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_features.tsv",
-        consensus=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_consensus.tsv",
+        features=f"{OUT}nuclear_markers/{{sample}}/{{sample}}.nuc_features.tsv",
+        consensus=f"{OUT}nuclear_markers/{{sample}}/{{sample}}.nuc_consensus.tsv",
     params:
         wd=lambda w, output: str(Path(output.features).parent / "mitom_nuc"),
         mitom=lambda w, input: config["mitom_dir"] or f"{MITOM_NUC_DB}/Mitom",
     resources:
         mem_mb=8000,
     log:
-        f"{OUT}logs/nuc_markers/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/nuc_markers/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/nuc_markers/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/nuc_markers/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/mitom.yaml"
@@ -113,15 +111,15 @@ rule nuc_copies:
         consensus=rules.nuc_markers.output.consensus,
         busco=rules.busco.output.summary,
     output:
-        tsv=f"{OUT}nuclear/{{sample}}/{{sample}}.copy_number.tsv",
+        tsv=f"{OUT}nuclear_markers/{{sample}}/{{sample}}.copy_number.tsv",
     params:
         busco_dir=lambda w, input: str(Path(input.busco).parent / "busco"),
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/nuc_copies/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/nuc_copies/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/nuc_copies/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/nuc_copies/{{sample}}.tsv"
     conda:
         "../envs/python.yaml"
     script:
@@ -132,9 +130,7 @@ rule getorganelle_histone:
     """Histone cluster (H1, H2A, H2B, H3, H4) with GetOrganelle -F anonym and the bundled H1-H4 seed / label
     (resources/histone; an H3-only label kept only the H3 piece). Rounds of reads as for the rDNA."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
         seed=HIST_SEED,
         label=HIST_LABEL,
     output:
@@ -149,9 +145,9 @@ rule getorganelle_histone:
     resources:
         mem_mb=NUC_MEM,
     log:
-        f"{OUT}logs/getorganelle_histone/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/getorganelle_histone/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/getorganelle_histone/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/getorganelle_histone/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/getorganelle.yaml"
@@ -180,9 +176,9 @@ rule histone_annotate:
     resources:
         mem_mb=2000,
     log:
-        f"{OUT}logs/histone_annotate/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/histone_annotate/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/histone_annotate/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/histone_annotate/{{sample}}.tsv"
     threads: 4
     conda:
         "../envs/mitom.yaml"
@@ -203,7 +199,7 @@ rule nuc_compare:
         histone=rules.histone_annotate.output.gb,
         spades=rules.nuc_markers.output.consensus,
     output:
-        tsv=f"{OUT}nuclear/{{sample}}/{{sample}}.nuc_compare.tsv",
+        tsv=f"{OUT}nuclear_markers/{{sample}}/{{sample}}.nuc_compare.tsv",
     params:
         nm=str(Path(workflow.basedir) / "scripts" / "nuclear_markers.py"),
         rdna=lambda w, input: str(Path(input.rdna).parent / "mitom_nuc" / "out"),
@@ -212,9 +208,9 @@ rule nuc_compare:
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/nuc_compare/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/nuc_compare/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/nuc_compare/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/nuc_compare/{{sample}}.tsv"
     conda:
         "../envs/mitom.yaml"
     shell:

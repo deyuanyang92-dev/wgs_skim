@@ -15,9 +15,9 @@ rule blast:
     resources:
         mem_mb=48000,                     # a local nt / marker database is memory-mapped: 47.5 GB peak (metazoa_marker)
     log:
-        f"{OUT}logs/blast.log",
+        f"{OUT}pipeline_info/logs/blast.log",
     benchmark:
-        f"{OUT}benchmarks/blast.tsv"
+        f"{OUT}pipeline_info/benchmarks/blast.tsv"
     threads: 8
     conda:
         "../envs/blast.yaml"

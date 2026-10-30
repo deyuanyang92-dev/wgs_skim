@@ -1,22 +1,20 @@
 rule spades:
     """Whole-genome assembly. -m is a hard limit: estimated from clean data, x1.5 on each retry (--retries),
     resuming from the last SPAdes checkpoint instead of starting over. Samples with an assembly made elsewhere
-    (sheet column `scaffolds`) are linked by rule assembly_given instead."""
+    (sheet column `scaffolds`) are linked by rule assembly_given instead (pipeline_info/inputs/assembly/)."""
     input:
-        r1=rules.fastp.output.r1,
-        r2=rules.fastp.output.r2,
-        json=rules.fastp.output.json,
+        unpack(clean_reads),
     output:
-        scaffolds=f"{OUT}assembly/{{sample}}/{{sample}}.scaffolds.fasta",
+        scaffolds=f"{OUT}spades/{{sample}}/{{sample}}.scaffolds.fasta",
     params:
         out=lambda w, output: str(Path(output.scaffolds).parent / "spades"),
         min_gb=config["spades_min_clean_gb"],
     resources:
         mem_mb=spades_mem_mb,
     log:
-        f"{OUT}logs/spades/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/spades/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/spades/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/spades/{{sample}}.tsv"
     threads: 32
     wildcard_constraints:
         sample=one_of([x for x in SAMPLES if x not in GIVEN_ASM]),
@@ -50,7 +48,7 @@ rule assembly_given:
     input:
         lambda w: GIVEN[w.sample]["scaffolds"],
     output:
-        scaffolds=f"{OUT}assembly/{{sample}}/{{sample}}.scaffolds.fasta",
+        scaffolds=f"{OUT}pipeline_info/inputs/assembly/{{sample}}/{{sample}}.scaffolds.fasta",
     wildcard_constraints:
         sample=one_of(GIVEN_ASM),
     localrule: True
@@ -67,7 +65,7 @@ rule busco_lineage:
     resources:
         mem_mb=1000,
     log:
-        f"{OUT}logs/busco_download/{{lineage}}.log",
+        f"{OUT}pipeline_info/logs/busco_download/{{lineage}}.log",
     conda:
         "../envs/busco.yaml"
     shell:
@@ -76,19 +74,19 @@ rule busco_lineage:
 
 rule busco:
     input:
-        scaffolds=rules.spades.output.scaffolds,
+        scaffolds=lambda w: scaffolds_of(w.sample),
         lineage=busco_lineage_dir,
     output:
-        summary=f"{OUT}assembly/{{sample}}/{{sample}}.busco.txt",
+        summary=f"{OUT}busco/{{sample}}/{{sample}}.busco.txt",
     params:
         out=lambda w, output: str(Path(output.summary).parent),
         mode=config["busco_mode"],
     resources:
         mem_mb=16000,
     log:
-        f"{OUT}logs/busco/{{sample}}.log",
+        f"{OUT}pipeline_info/logs/busco/{{sample}}.log",
     benchmark:
-        f"{OUT}benchmarks/busco/{{sample}}.tsv"
+        f"{OUT}pipeline_info/benchmarks/busco/{{sample}}.tsv"
     threads: 16
     conda:
         "../envs/busco.yaml"
