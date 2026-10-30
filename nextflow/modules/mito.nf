@@ -66,7 +66,7 @@ process GETORGANELLE_MT {
 
     input:
     tuple val(s), path(r1), path(r2), path(seed, stageAs: 'seed/*')
-    path db
+    path db, stageAs: "staged_db"
 
     output:
     tuple val(s), path("getorganelle/${s}/round0"), emit: round0
@@ -103,7 +103,7 @@ process MT_ITERATE {
 
     input:
     tuple val(s), path(r1), path(r2), path(json), val(gb), path(round0)
-    path db
+    path db, stageAs: "staged_db"
 
     output:
     tuple val(s), path("getorganelle/${s}/${s}.getorganelle.fasta"), path("getorganelle/${s}/${s}.getorganelle.json"), emit: result

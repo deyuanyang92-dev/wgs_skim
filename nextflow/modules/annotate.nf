@@ -60,7 +60,7 @@ process MITOM_ANNOTATE {
 
     input:
     tuple val(s), path(fasta)
-    path db             // MITOM_DB output, or [] when both mitom_dir and mitos_refdir are given
+    path db, stageAs: "staged_db"             // MITOM_DB output, or [] when both mitom_dir and mitos_refdir are given
 
     output:
     tuple val(s), path("mitom/${s}/${s}.mt.gb"), emit: gb

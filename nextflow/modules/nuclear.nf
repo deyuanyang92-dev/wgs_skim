@@ -56,7 +56,7 @@ process NR_ANNOTATE {
 
     input:
     tuple val(s), path(fasta)
-    path db             // MITOM_NUC_DB output, or [] with mitom_dir
+    path db, stageAs: "staged_db"             // MITOM_NUC_DB output, or [] with mitom_dir
 
     output:
     // mitom_nuc/out is read by NUC_COMPARE; created empty without rDNA (a missing directory means the same there)
@@ -96,7 +96,7 @@ process HISTONE_ANNOTATE {
 
     input:
     tuple val(s), path(fasta)
-    path db
+    path db, stageAs: "staged_db"
 
     output:
     tuple val(s), path("histone/${s}/${s}.histone.gbf"), path("histone/${s}/mitom_nuc"), emit: gb
@@ -132,7 +132,7 @@ process NUC_MARKERS {
 
     input:
     tuple val(s), path(scaffolds)
-    path db
+    path db, stageAs: "staged_db"
 
     output:
     tuple val(s), path("nuclear_markers/${s}/${s}.nuc_features.tsv"), path("nuclear_markers/${s}/${s}.nuc_consensus.tsv"),
