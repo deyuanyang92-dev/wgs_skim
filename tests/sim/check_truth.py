@@ -119,7 +119,24 @@ def main():
         fh.write("| 功能 | 样品 | 项目 | 结果 | 真值 | 判断 | 备注 |\n|---|---|---|---|---|---|---|\n")
         for r in rows:
             fh.write("| " + " | ".join(str(r[c]).replace("|", "/") for c in COLS) + " |\n")
-    print(f"{len(rows)} checks, {len(bad)} to check -> {out / 'truth_check.md'}")
+    index(out, rows)
+    print(f"{len(rows)} checks, {len(bad)} to check -> {out / 'truth_check.md'}, {out / 'README.md'}")
+
+
+def index(out, rows):
+    """OUT/README.md: every function directory (latest run: CHECK.md) with its truth checks"""
+    lines = ["# wgs_skim 全功能测试（5 个模拟样品）\n",
+             "每个功能一个目录；目录中 CHECK.md = 命令、结果、看什么；truth_check.md = 全部与真值的比较。\n",
+             "| 功能目录 | 运行 | 用时 | 与真值比较 | 看什么 |", "|---|---|---|---|---|"]
+    for d in sorted(p for p in out.iterdir() if p.is_dir() and re.match(r"\d\d_", p.name)):
+        chk = (d / "CHECK.md").read_text() if (d / "CHECK.md").exists() else ""
+        m = re.match(r"# \S+ \S+: (\w+) \((\d+) s\)", chk)
+        what = re.search(r"\*\*看什么\*\*：(.*)", chk)
+        mine = [r for r in rows if r["function"] == d.name]
+        tc = f"{sum(r['verdict'] == 'ok' for r in mine)}/{len(mine)} ok" if mine else ""
+        lines.append(f"| [{d.name}]({d.name}/CHECK.md) | {m.group(1) if m else '?'} | {m.group(2) + ' s' if m else ''} | "
+                     f"{tc} | {what.group(1).replace('|', '/') if what else ''} |")
+    (out / "README.md").write_text("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":
