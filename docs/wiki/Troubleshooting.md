@@ -4,12 +4,12 @@
 
 | 文件 | 内容 |
 |---|---|
-| `logs/<任务>/<样品>.log` | 该任务所调用工具自己的输出（错误信息通常在最后几行） |
-| `benchmarks/<任务>/<样品>.tsv` | 时间（s）与峰值内存（max_rss，MB）—— 判断是否内存不足 |
+| `pipeline_info/logs/<任务>/<样品>.log` | 该任务所调用工具自己的输出（错误信息通常在最后几行） |
+| `pipeline_info/benchmarks/<任务>/<样品>.tsv` | 时间（s）与峰值内存（max_rss，MB）—— 判断是否内存不足 |
 | `.snakemake/log/*.log` | 每次运行的 Snakemake 日志：哪些任务失败（`Error in rule …`） |
 | `wgs_skim run ... -n -p` | 不运行，列出每个任务的完整 shell 命令（可复制出来单独运行调试） |
 | `<marker>/getorganelle/<s>/rounds.tsv` | rDNA / 组蛋白每轮的数据量、结果、基因覆盖、是否采用 |
-| `mito/<s>/<s>.mt.json` | 线粒体来源、成环与否、迭代停止原因 |
+| `mitogenome/<s>/<s>.mt.json` | 线粒体来源、成环与否、迭代停止原因 |
 
 一个任务失败，其他样品照常进行（`keep-going`），最后的汇总等待；修正问题后运行**同一条命令**即可续跑。
 
@@ -32,7 +32,7 @@
 | SPAdes 没有运行（`clean data ... < spades_min_clean_gb`） | 数据量低于阈值 | 降低 `spades_min_clean_gb`（0 = 全部组装） |
 | Trinity 很慢（第二阶段 `succeeded(n) x% completed` 增长缓慢） | 第二阶段对每个 read 簇运行一次 Trinity（小数据也有上万个），大量小文件，磁盘 / CPU 被其他任务占用时很慢 | 机器空闲时运行；给 Trinity 更多线程 `-- --set-threads trinity=32` |
 | `MitoFinder needs a reference mitogenome GenBank` | MitoFinder 必须有参考 | `--ref related.gb`（`wgs_skim mitofinder`）或 `--mitofinder-ref`（`run`）；与 `meangs-getorganelle` 一起运行时自动用样品自己的 MitoM 注释 |
-| `MitoFinder found no mitochondrial contig`（结果为空文件） | 组装中没有与参考相似的 contig：参考太远、或线粒体覆盖度太低没有组装出来 | 换更近的参考；看 `logs/mitofinder/<s>.log`；用 GetOrganelle 组装 |
+| `MitoFinder found no mitochondrial contig`（结果为空文件） | 组装中没有与参考相似的 contig：参考太远、或线粒体覆盖度太低没有组装出来 | 换更近的参考；看 `pipeline_info/logs/mitofinder_<来源>/<s>.log`；用 GetOrganelle 组装 |
 | MitoFinder：`singularity: command not found` / 镜像不存在 | 配置了 `mitofinder_sif` 但本机没有 Singularity 或文件 | 修正路径，或 `--config mitofinder_sif=` 改用 bioconda MitoFinder 1.4.1 |
 | `no FASTA files ... in` | `-i` 目录中没有 .fasta / .fa / .fna / .fas | 检查扩展名；或直接列出文件 |
 | `sample 'X' found twice`（`-i`） | 两个文件的名称（去掉扩展名后）相同 | 改名，或分两次运行 |
@@ -49,4 +49,4 @@
 
 1. `wgs_skim run ... -n -p` 找到失败任务的完整命令；
 2. 激活该任务的 conda 环境（日志开头 `Activating conda environment: …`）单独运行它；
-3. 在 GitHub 提 issue，附上 `logs/<任务>/<样品>.log` 和 `benchmarks/…tsv`。
+3. 在 GitHub 提 issue，附上 `pipeline_info/logs/<任务>/<样品>.log` 和 `benchmarks/…tsv`。

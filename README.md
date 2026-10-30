@@ -155,7 +155,7 @@ Common options: `-j` cores and `--mem-gb` memory for all jobs together, `-t` tax
 | mitogenome (second method) | SPAdes-MitoFinder (reference: `--mitofinder-ref`, or the sample's own MitoM annotation with `meangs-getorganelle`) | `spades-mitofinder` |
 | whole genome | SPAdes-BUSCO (fastp first) | `spades-busco` / `fastp-spades-busco` |
 | transcriptome | rnaSPAdes-BUSCO (recommended), Trinity-BUSCO; both: `rna` | `rnaspades-busco` / `trinity-busco` |
-| mt genes from RNA-seq | rnaSPAdes-MitoFinder, Trinity-MitoFinder; all samples gathered per gene (`mitofinder/<source>/genes/`) | `rnaspades-mitofinder` / `trinity-mitofinder` |
+| mt genes from RNA-seq | rnaSPAdes-MitoFinder, Trinity-MitoFinder; all samples gathered per gene (`mitofinder_<source>/genes/`) | `rnaspades-mitofinder` / `trinity-mitofinder` |
 
 ```bash
 wgs_skim run -r raw/ -o res/ --steps meangs-getorganelle,spades-mitofinder,spades-busco
@@ -194,36 +194,36 @@ they depend on run too, and finished ones are reused.
 
 Every command below works on a directory of raw reads of any number of samples (sample names from the file names),
 reuses what an earlier command in the same results directory already made, and writes one log per sample under
-`logs/<step>/`. Replace `-r rawdata/` by `-s samples.tsv` for a sample sheet.
+`pipeline_info/logs/<step>/`. Replace `-r rawdata/` by `-s samples.tsv` for a sample sheet.
 
 ```bash
 # QC only (fastp): clean reads + fastp.html per sample
-wgs_skim run -r rawdata/ --steps fastp                   # -> qc/<sample>/<sample>.R1.fq.gz, .fastp.html/.json
+wgs_skim run -r rawdata/ --steps fastp                   # -> fastp/<sample>/<sample>.R1.fq.gz, .fastp.html/.json
 
 # SPAdes in any mode (as spadesv3.5.5.py): genome (default) isolate sc meta rna rnaviral plasmid metaplasmid
 # metaviral bio sewage corona; several at once, each with BUSCO (-m transcriptome for rna / rnaviral)
-wgs_skim run -r rawdata/ --steps spades,busco --spades-modes genome,meta,plasmid   # -> assembly/<s>/<s>.meta.fasta ...
+wgs_skim run -r rawdata/ --steps spades,busco --spades-modes genome,meta,plasmid   # -> spades/<s>/<s>.meta.fasta ...
 wgs_skim run -r rawdata/ --steps spades --spades-modes isolate --config spades_careful=true spades_kmers=21,33,55
 
 # transcriptome (RNA-seq reads): rnaSPAdes and Trinity, BUSCO on each
-wgs_skim run -r rnaseq/ --steps rna                     # -> assembly/<s>/<s>.rna.fasta, <s>.trinity.fasta, *.busco.txt
+wgs_skim run -r rnaseq/ --steps rna                     # -> spades/<s>/<s>.rna.fasta, <s>.trinity.fasta, *.busco.txt
 wgs_skim run -r rnaseq/ --steps trinity,busco --spades-modes rna --config trinity_extra="--min_contig_length 300"
 
 # SPAdes whole-genome assembly, then BUSCO on it
-wgs_skim run -r rawdata/ --steps spades                  # -> assembly/<sample>/<sample>.scaffolds.fasta
-wgs_skim run -r rawdata/ --steps busco                   # -> assembly/<sample>/<sample>.busco.txt (runs spades first)
+wgs_skim run -r rawdata/ --steps spades                  # -> spades/<sample>/<sample>.scaffolds.fasta
+wgs_skim run -r rawdata/ --steps busco                   # -> busco/<sample>/<sample>.busco.txt (runs spades first)
 wgs_skim run -r rawdata/ --steps spades -- --set-threads spades=48 --set-resources spades:mem_mb=250000
 
 # mitogenome: MEANGS seed -> GetOrganelle -> reseeded rounds until circular (-> SPAdes scaffold if that closes)
-wgs_skim run -r rawdata/ --steps mito                    # -> mito/<sample>/<sample>.mt.fasta + .mt.json
+wgs_skim run -r rawdata/ --steps mito                    # -> mitogenome/<sample>/<sample>.mt.fasta + .mt.json
 wgs_skim run -r rawdata/ --steps getorganelle            # the same with GetOrganelle's own animal_mt seeds, no MEANGS
-wgs_skim run -r rawdata/ --steps annotate                # + MitoM annotation -> annotation/<sample>/<sample>.mt.gb
+wgs_skim run -r rawdata/ --steps annotate                # + MitoM annotation -> mitom/<sample>/<sample>.mt.gb
 wgs_skim run -r rawdata/ --steps topology                # + read-based circular / linear check -> topology/
 
 # nuclear multi-copy markers: 18S-ITS-28S and the histone cluster (GetOrganelle, MitoM .gbf)
 wgs_skim run -r rawdata/ --steps nr                      # -> rdna/<sample>/<sample>.rdna.gbf, histone/<sample>/<sample>.histone.gbf
 wgs_skim run -r rawdata/ --steps nuclear                 # + the same genes in the SPAdes assembly, copy numbers,
-                                                         #   GetOrganelle vs SPAdes per gene -> nuclear/<sample>/
+                                                         #   GetOrganelle vs SPAdes per gene -> nuclear_markers/<sample>/
 
 # species check: COX1 and rDNA genes against nt, top hits with GenBank taxonomy
 wgs_skim run -r rawdata/ --steps blast --blast-db /db/blast_marker/metazoa_marker   # local (fast, see build-blastdb)
@@ -231,7 +231,7 @@ wgs_skim run -r rawdata/ --steps blast --email you@example.com                  
 wgs_skim run -r rawdata/ --steps blast --blast-mt cox1,16s,cytb --blast-nr 18S,ITS,28S
 
 # genome size and heterozygosity (jellyfish + GenomeScope2)
-wgs_skim run -r rawdata/ --steps genome_size             # -> genome_size/<sample>/<sample>.genomescope.txt + plots
+wgs_skim run -r rawdata/ --steps genome_size             # -> genomescope/<sample>/<sample>.genomescope.txt + plots
 
 # the report of everything made so far (one row per sample + HTML; with other steps: of those steps)
 wgs_skim run -r rawdata/ --steps summary                 # -> summary/samples.tsv, summary/report.html
@@ -387,7 +387,7 @@ order:
 4. **join** — several pieces joined end to end.
 
 ```bash
-wgs_skim circularize -i mitofinder/<sample>_all_mt.fasta --spades spades_dir/ -o circ/ --prefix <sample>
+wgs_skim circularize -i mitofinder_spades/contigs/<sample>_all_mt.fasta --spades spades_dir/ -o circ/ --prefix <sample>
 ```
 
 MJ20260820041, three individuals of one species, MitoFinder contigs on full-data SPAdes (~2 min, ~7 GB RAM each):
@@ -482,8 +482,8 @@ Two ways for each marker, compared (rules in `workflow/rules/nuclear.smk`, code 
 - **GetOrganelle** assembles the tandem unit from the reads (`-F anonym`): rDNA with `resources/rdna`, histones with
   `resources/histone` (H1-H4 cluster copies of annelids + Hesionidae H3; an H3-only label kept only the H3 piece).
   MitoM annotates it: `rdna/<sample>/<sample>.rdna.gbf`, `histone/<sample>/<sample>.histone.gbf` (GenBank).
-- **SPAdes-MitoM**: the copies scattered over the SPAdes contigs, one consensus per gene (`nuclear/<sample>/`).
-- `nuclear/<sample>/<sample>.nuc_compare.tsv`: per gene both lengths, partial ends, histone class, mismatches and
+- **SPAdes-MitoM**: the copies scattered over the SPAdes contigs, one consensus per gene (`nuclear_markers/<sample>/`).
+- `nuclear_markers/<sample>/<sample>.nuc_compare.tsv`: per gene both lengths, partial ends, histone class, mismatches and
   indels on the overlap, verdict identical / contained (the partial one inside the other) / differ / only one side.
 
 Histone copies are classed by MitoM: replication-dependent (the cluster; H3 residues 31/87/89/90 = A S V M),
@@ -518,12 +518,12 @@ wgs_skim_results/
 ├── summary/samples.tsv        one row per sample: clean data, mitogenome length / circular / round, genes,
 │   summary/report.html        rDNA length, topology verdicts, SPAdes N50, BUSCO, genome size, heterozygosity, top BLAST hits
 ├── qc/<sample>/               clean reads, fastp.html / fastp.json
-├── mito/<sample>/<sample>.mt.fasta   final mitogenome (+ .mt.json: source, circular, why iteration stopped); round0..N
+├── mitogenome/<sample>/<sample>.mt.fasta   final mitogenome (+ .mt.json: source, circular, why iteration stopped); round0..N
 ├── rdna/<sample>/<sample>.nr.fasta   18S-ITS-28S (+ .rdna.gbf / .nr_features.tsv: 18S ITS1 5.8S ITS2 28S, mitom nuc)
 ├── histone/<sample>/<sample>.histone.fasta   histone cluster (+ .histone.gbf: H1 H2A H2B H3 H4, mitom nuc)
-├── annotation/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
+├── mitom/<sample>/<sample>.mt.gb   MitoM annotation (GenBank; + .mitom.tsv gene counts)
 ├── topology/<sample>/         read-based circular / linear check, end diagnosis
-├── nuclear/<sample>/          rDNA + histone copies in SPAdes, consensus, copy_number.tsv, nuc_compare.tsv
+├── nuclear_markers/<sample>/          rDNA + histone copies in SPAdes, consensus, copy_number.tsv, nuc_compare.tsv
 ├── assembly/<sample>/         SPAdes scaffolds, BUSCO short summary; other SPAdes modes <sample>.<mode>.fasta,
 │                              Trinity <sample>.trinity.fasta, each with <sample>.<mode>.busco.txt
 ├── genome_size/<sample>/      k-mer histogram, GenomeScope2 plots and summary
@@ -560,11 +560,11 @@ With `--engine nextflow`, `-resume` is always on: the same command reuses every 
 
 ## Troubleshooting
 
-Where to look: `logs/<step>/<sample>.log` is the tool's own output for that job; `benchmarks/<step>/<sample>.tsv`
+Where to look: `pipeline_info/logs/<step>/<sample>.log` is the tool's own output for that job; `pipeline_info/benchmarks/<step>/<sample>.tsv`
 its runtime and peak memory; `.snakemake/log/` the Snakemake log of each run. A failed job keeps `keep-going`: the
 other samples continue, the summary waits. `wgs_skim run ... -n` shows what would run without running it.
 With Nextflow: the error message names the task's work directory (`.command.sh` = the command, `.command.err`,
-`logs/<step>/<sample>.log` inside it); `results/.nextflow.log` is the run log. Fix the cause, run the same command:
+`pipeline_info/logs/<step>/<sample>.log` inside it); `results/.nextflow.log` is the run log. Fix the cause, run the same command:
 finished tasks are reused.
 
 | message / symptom | cause | what to do |
@@ -586,7 +586,7 @@ finished tasks are reused.
 | `rdna_copies` / `histones` empty in the report | no SPAdes assembly or no BUSCO single-copy genes to normalise against | needs steps `spades` + `busco` (`nuclear` runs them) |
 
 Still stuck: the full command Snakemake ran is the second line `wgs_skim run` prints; run it with `-n -p` to see
-each job's shell command, and open an issue with `logs/<step>/<sample>.log` attached.
+each job's shell command, and open an issue with `pipeline_info/logs/<step>/<sample>.log` attached.
 
 ## Testing
 

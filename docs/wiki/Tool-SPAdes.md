@@ -7,7 +7,7 @@ wgs_skim spades -r clean_reads/ -o spades_out/ --mode meta,plasmid      # 多个
 wgs_skim spades -r raw/ -o spades_out/ --qc --mode isolate --config spades_careful=true
 ```
 
-| `--mode` | SPAdes 参数 | 输出 `assembly/<s>/` |
+| `--mode` | SPAdes 参数 | 输出 `spades/<s>/` |
 |---|---|---|
 | `genome`（默认） | `--only-assembler` | `<s>.scaffolds.fasta` |
 | `isolate` / `sc` / `meta` | `--isolate` / `--sc` / `--meta` | `<s>.<mode>.fasta`（scaffolds） |

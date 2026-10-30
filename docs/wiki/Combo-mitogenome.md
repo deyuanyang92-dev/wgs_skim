@@ -16,7 +16,7 @@ wgs_skim run -r raw/ -o res/ --steps meangs-getorganelle --config mt_iter_max_da
    `mt_iter_rounds` = 3 轮；成环或结果不再变化时停止。
 4. **SPAdes 兜底**（同时运行 SPAdes 时）：GetOrganelle 仍未成环、而 SPAdes 中对应的 scaffold 能闭合时，用 SPAdes 的结果。
 
-输出 `mito/<s>/<s>.mt.fasta`；`<s>.mt.json` 记录来源、轮次与停止原因（`circular`、`no change after roundN`、`rounds exhausted`）。
+输出 `mitogenome/<s>/<s>.mt.fasta`；`<s>.mt.json` 记录来源、轮次与停止原因（`circular`、`no change after roundN`、`rounds exhausted`）。
 
 ## SPAdes-MitoFinder
 
@@ -30,8 +30,8 @@ wgs_skim run -r raw/ -o res/ --steps meangs-getorganelle,spades-mitofinder
 wgs_skim mitofinder -i spades_assemblies/ -o mf/ --ref related.gb
 ```
 
-输出 `mitofinder/spades/<s>/<s>.mitofinder.fasta`、`.gb`，`mitofinder/spades/mitofinder_summary.tsv`（每个样品每个基因的长度），
-`mitofinder/spades/genes/<基因>.fasta`。详见 [MitoFinder](Tool-MitoFinder.md)。
+输出 `mitofinder_spades/<s>/<s>.mitofinder.fasta`、`.gb`，`mitofinder_spades/mitofinder_summary.tsv`（每个样品每个基因的长度），
+`mitofinder_spades/genes/<基因>.fasta`。详见 [MitoFinder](Tool-MitoFinder.md)。
 
 ## 两种结果是否一致：`wgs_skim compare`
 
@@ -39,7 +39,7 @@ wgs_skim mitofinder -i spades_assemblies/ -o mf/ --ref related.gb
 是否位于 GetOrganelle 的重复区或同聚物中，并做结构检查（倒位、易位、缺失基因、移码）。
 
 ```bash
-wgs_skim compare -a res/mito/S/round1 -b mitofinder=res/mitofinder/spades/S/S.mitofinder.fasta \
+wgs_skim compare -a res/mito/S/round1 -b mitofinder=res/mitofinder_spades/S/S.mitofinder.fasta \
     --gb res/annotation/S/S.mt.gb -o cmp/ --prefix S                   # 一个样品
 wgs_skim compare --results results/ -o compare/                       # 一批（Snakemake 管理）
 wgs_skim compare --sheet sheet.tsv -o compare/                        # 列：sample ref other [spades gb gff gfa]
@@ -51,7 +51,7 @@ CHY008 consistent，4 个样品 110 s。
 
 ## 注释：MitoM
 
-`--steps annotate`（或单独 `wgs_skim mitom -i`）：蛋白基因、rRNA、tRNA，cox1 起点，NCBI 检查，输出 `annotation/<s>/<s>.mt.gb`。见 [MitoM](Tool-MitoM.md)。
+`--steps annotate`（或单独 `wgs_skim mitom -i`）：蛋白基因、rRNA、tRNA，cox1 起点，NCBI 检查，输出 `mitom/<s>/<s>.mt.gb`。见 [MitoM](Tool-MitoM.md)。
 
 ## 环还是线性？reads 验证
 
@@ -73,7 +73,7 @@ CHY008 consistent，4 个样品 110 s。
 MitoFinder / SPAdes 的线粒体 contig 常常没闭合。不需要 reads，用 SPAdes 组装图闭合：
 
 ```bash
-wgs_skim circularize -i res/mitofinder/spades/S/S.mitofinder.fasta --spades res/assembly/S/spades -o circ/ --prefix S
+wgs_skim circularize -i res/mitofinder_spades/S/S.mitofinder.fasta --spades res/assembly/S/spades -o circ/ --prefix S
 ```
 
 四种方法（由强到弱）：组装图证明首尾相连 → 图中走一条线粒体深度的路径补上缺口（串联重复拷贝数按深度估计）→

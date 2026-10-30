@@ -8,7 +8,7 @@ wgs_skim run -r rnaseq/ -o res/ --steps trinity-busco       # fastp → Trinity 
 wgs_skim run -r rnaseq/ -o res/ --steps rna                 # 两者都做，各自 BUSCO
 ```
 
-| 步骤 | 工具 | 输出 `assembly/<s>/` |
+| 步骤 | 工具 | 输出 `spades/<s>/` |
 |---|---|---|
 | 质控 | [fastp](Tool-fastp.md) | — |
 | 组装 | [SPAdes](Tool-SPAdes.md) `--rna -k 21,33,55` | `<s>.rna.fasta` |
@@ -41,5 +41,5 @@ wgs_skim mitofinder -i transcripts/ -o mf/ --ref related.gb        # 已有转�
 流程：fastp → rnaSPAdes / Trinity → MitoFinder（每个样品）→ 按基因汇总所有样品 → **BLAST 污染检查**（每个基因比对 nt，
 最佳命中是别的科且高度相似时标记）。
 
-结果在 `mitofinder/rna/`（rnaSPAdes）和 `mitofinder/trinity/`（Trinity）；污染检查在 `mitofinder/<来源>/blast/samples_check.tsv`；`mitofinder_summary.tsv`（每个样品每个基因的长度）、
+结果在 `mitofinder_rnaspades/`（rnaSPAdes）和 `mitofinder_trinity/`（Trinity）；污染检查在 `mitofinder_<来源>/blast/samples_check.tsv`；`mitofinder_summary.tsv`（每个样品每个基因的长度）、
 `genes/<基因>.fasta`（所有样品的同一基因，可直接比对），详见 [MitoFinder](Tool-MitoFinder.md)。

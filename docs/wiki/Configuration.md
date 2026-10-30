@@ -83,7 +83,7 @@
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `spades_modes` | `"genome"` | comma separated: genome (whole-genome skim: BUSCO, nuclear markers, mt fallback) and any SPAdes mode: isolate sc meta rna rnaviral plasmid metaplasmid metaviral bio sewage corona -> assembly/<s>/<s>.<mode>.fasta + .<mode>.busco.txt |
+| `spades_modes` | `"genome"` | comma separated: genome (whole-genome skim: BUSCO, nuclear markers, mt fallback) and any SPAdes mode: isolate sc meta rna rnaviral plasmid metaplasmid metaviral bio sewage corona -> spades/<s>/<s>.<mode>.fasta + .<mode>.busco.txt |
 | `spades_kmers` | `""` | -k for the non-genome modes ("" = SPAdes chooses) |
 | `rnaspades_kmers` | `"auto"` | -k of rna / rnaviral: auto = SPAdes chooses 2 values from the read length, as the manual advises (small k: chimeric transcripts); "21,33,55" = the earlier snakefile |
 | `spades_careful` | `false` | --careful (isolate, sc and plasmid modes only) |
@@ -97,7 +97,7 @@
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `mitofinder_ref` | `""` | reference mitogenome(s) GenBank (-r); empty = the sample's own MitoM annotation (when the mitogenome step runs too), otherwise required |
-| `mitofinder_assembly` | `""` | what MitoFinder searches (comma separated, results per source mitofinder/<source>/): spades (the SPAdes assembly), rna (rnaSPAdes transcripts), trinity (Trinity transcripts), given (sheet column scaffolds / wgs_skim mitofinder -i), megahit / metaspades (MitoFinder assembles the reads itself); empty = given if present, else what the run assembles |
+| `mitofinder_assembly` | `""` | what MitoFinder searches (comma separated, results per source mitofinder_<source>/): spades (the SPAdes assembly), rna (rnaSPAdes transcripts), trinity (Trinity transcripts), given (sheet column scaffolds / wgs_skim mitofinder -i), megahit / metaspades (MitoFinder assembles the reads itself); empty = given if present, else what the run assembles |
 | `mitofinder_min_contig` | `1000` | --min-contig-size for genome assemblies (MitoFinder's default) |
 | `mitofinder_min_contig_rna` | `300` | ... for transcripts (rna, trinity): single-gene mt transcripts are short |
 | `mitofinder_cov_factor` | `5` | genome assemblies: only scaffolds >= this x the weighted median coverage (0 = all) |

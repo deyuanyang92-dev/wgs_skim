@@ -12,10 +12,10 @@ wgs_skim run -r raw/ -o res/ --steps spades-busco,genome_size            # + 基
 
 | 步骤 | 工具 | 输出 |
 |---|---|---|
-| 质控 | [fastp](Tool-fastp.md) | `qc/<s>/` |
-| 组装 | [SPAdes](Tool-SPAdes.md) genome 模式，`--only-assembler` | `assembly/<s>/<s>.scaffolds.fasta` |
-| 评估 | [BUSCO](Tool-BUSCO.md) genome 模式 | `assembly/<s>/<s>.busco.txt` |
-| 基因组大小（可选） | [Jellyfish + GenomeScope2](Tool-GenomeScope.md) | `genome_size/<s>/` |
+| 质控 | [fastp](Tool-fastp.md) | `fastp/<s>/` |
+| 组装 | [SPAdes](Tool-SPAdes.md) genome 模式，`--only-assembler` | `spades/<s>/<s>.scaffolds.fasta` |
+| 评估 | [BUSCO](Tool-BUSCO.md) genome 模式 | `busco/<s>/<s>.busco.txt` |
+| 基因组大小（可选） | [Jellyfish + GenomeScope2](Tool-GenomeScope.md) | `genomescope/<s>/` |
 
 内存：SPAdes 按数据量估计（6.5 GiB / Gb clean 数据；环节动物实测 5.3–6.1），`--mem-gb` 之内调度，
 大任务不会同时启动而互相挤爆内存；不足时自动重试（1.5 倍）并从检查点继续。

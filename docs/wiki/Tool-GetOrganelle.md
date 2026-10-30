@@ -13,7 +13,7 @@ wgs_skim getorganelle -r clean_reads/ -o go_out/ --rounds 0      # 不迭代，�
 1. 第 0 轮：`-F animal_mt -R 10 -k 21,45,65,85,105`。
 2. 没有成环：以上一轮结果为种子，用更多 reads（≤ `mt_iter_max_data_gb` = 20 Gb）、`-R 20` 再组装，最多 `--rounds`（默认 3）轮；
    成环、或结果不再变化时停止。
-- 输出：`mito/<s>/<s>.mt.fasta`（最终线粒体）、`<s>.mt.json`（第几轮、是否成环、停止原因）、`round0..N/`（每轮的 GetOrganelle 结果和组装图）。
+- 输出：`mitogenome/<s>/<s>.mt.fasta`（最终线粒体）、`<s>.mt.json`（第几轮、是否成环、停止原因）、`round0..N/`（每轮的 GetOrganelle 结果和组装图）。
 - 实测（0.3 Gb）：第 0 轮 2–3 min / 3.6 GB，每轮迭代 2–10 min / 5.8 GB。
 
 ## rDNA 与组蛋白（`--target nr`）

@@ -1,24 +1,46 @@
 # 输出
 
+结果目录按工具分（与 nf-core、Snakemake 社区流程的习惯相同）：**每个工具一个目录，其中每个样品一个子目录，
+该工具的汇总表在工具目录这一层**；所有工具合在一起的汇总在 `summary/`；日志、配置等运行记录在 `pipeline_info/`。
+只运行一个工具（如 `wgs_skim busco`）时，结果目录里只有该工具的目录和 `pipeline_info/`。
+
 ```
 res/
-├── summary/samples.tsv        每个样品一行（列见下）
-│   summary/report.html        同一内容的网页报告
-├── qc/<s>/                    clean reads（<s>.R1.fq.gz / R2）、fastp.html、fastp.json
-├── mito/<s>/<s>.mt.fasta      最终线粒体；<s>.mt.json：来源、是否成环、迭代停止原因；round0..N 每轮 GetOrganelle
-│   mito/<s>/<s>.getorganelle.json   GetOrganelle 选中的那一轮
-├── annotation/<s>/<s>.mt.gb   MitoM 注释（GenBank）；<s>.mitom.tsv 基因数
-├── topology/<s>/              reads 检查环 / 线性、末端诊断
-├── rdna/<s>/                  <s>.nr.fasta、<s>.rdna.gbf（18S ITS1 5.8S ITS2 28S）、nr_features.tsv、rounds.tsv
-├── histone/<s>/               <s>.histone.fasta、<s>.histone.gbf（H1 H2A H2B H3 H4，组蛋白类别）、rounds.tsv
-├── nuclear/<s>/               SPAdes 中的 rDNA / 组蛋白拷贝、consensus/、copy_number.tsv、nuc_compare.tsv
-├── assembly/<s>/              <s>.scaffolds.fasta、<s>.busco.txt；其他模式 <s>.<mode>.fasta + .<mode>.busco.txt；
-│                              Trinity <s>.trinity.fasta + .trinity.busco.txt
-├── genome_size/<s>/           k-mer 直方图、GenomeScope2 图和 summary.txt
-├── blast/blast_topn.tsv       COX1 / rDNA 前 N 个命中，带 GenBank 物种与分类
-├── logs/<任务>/<s>.log        每个任务的工具输出
-└── benchmarks/<任务>/<s>.tsv  每个任务的时间与峰值内存
+├── fastp/                    <s>/  clean reads（<s>.R1.fq.gz / R2）、<s>.fastp.html、<s>.fastp.json
+│                             fastp_summary.tsv      每个样品：原始 / clean 数据量、Q30、GC、去接头的 reads
+├── meangs/                   <s>/<s>.seed.fasta     MEANGS 线粒体种子；meangs_summary.tsv
+├── getorganelle/             <s>/  round0、round1…（每轮 GetOrganelle）、<s>.getorganelle.fasta / .json（选中的一轮）
+│                             getorganelle_summary.tsv   长度、是否成环、用了几轮、停止原因
+├── mitogenome/               <s>/<s>.mt.fasta       最终线粒体（GetOrganelle 或 SPAdes 中更好的一个）；<s>.mt.json
+│                             mitogenome_summary.tsv
+├── mitom/                    <s>/<s>.mt.gb          MitoM 注释（GenBank）、<s>.mitom.tsv；mitom_summary.tsv
+├── topology/                 <s>/                   reads 检查环 / 线性、末端诊断
+├── rdna/                     <s>/  <s>.nr.fasta、<s>.rdna.gbf（18S ITS1 5.8S ITS2 28S）、nr_features.tsv、rounds.tsv
+│                             rdna_summary.tsv
+├── histone/                  <s>/  <s>.histone.fasta、<s>.histone.gbf（H1 H2A H2B H3 H4）；histone_summary.tsv
+├── nuclear_markers/          <s>/  SPAdes 中的 rDNA / 组蛋白拷贝、拷贝数、与 GetOrganelle 的比较
+├── spades/                   <s>/  <s>.scaffolds.fasta（基因组）、<s>.<模式>.fasta（rna、meta…）、spades/（SPAdes 目录）
+│                             spades_summary.tsv     每个样品每个组装：条数、总长、N50、最长
+├── trinity/                  <s>/<s>.trinity.fasta；trinity_summary.tsv
+├── busco/                    <s>/<s>.busco.txt（基因组）、<s>.<组装>.busco.txt（rna、trinity…）
+│                             busco_summary.tsv      C / S / D / F / M
+├── genomescope/              <s>/  k-mer 直方图、GenomeScope2 图与结果；genomescope_summary.tsv
+├── mitofinder_<来源>/        <s>/  MitoFinder 结果（来源：spades、rnaspades、trinity、megahit、assembly = 用户给的组装）
+│                             mitofinder_summary.tsv（基因表）、genes/<基因>.fasta、contigs/、contamination/（污染检查）
+├── blast/blast_topn.tsv      线粒体 / rDNA 的前 N 个命中，带 GenBank 物种与分类
+├── summary/                  samples.tsv（所有工具，每个样品一行，列见下）、report.html
+└── pipeline_info/            运行记录（不是结果）
+    ├── logs/<任务>/<s>.log         每个任务的工具输出
+    ├── benchmarks/<任务>/<s>.tsv   每个任务的时间与峰值内存
+    ├── config_<时间>.yaml          这次运行实际使用的全部参数
+    ├── run_<时间>.txt              命令、wgs_skim 与 Snakemake 版本、样品
+    ├── read_stats/<s>/             reads 不清洗时（--no-qc / 单个工具）的 reads 数，用于估计内存
+    └── inputs/                     命令行准备的输入：-i FASTA 的样品表、拆分的 FASTA、合并的 MitoFinder 参考
 ```
+
+**质控只做一次**：`wgs_skim run` 默认先 fastp，后面所有步骤直接读取 `fastp/<s>/` 中的 clean reads；reads 已经是 clean 的
+（例如上一次运行的 `fastp/` 目录），用 `wgs_skim run --no-qc` 或单个工具（默认不质控），工具直接读取原来的文件，
+不会再生成 `fastp/`。
 
 ## summary/samples.tsv 的列
 
@@ -43,4 +65,4 @@ res/
 
 旧流程（Temp_scripts/wgs_skim_pipeline）在每个结果目录中写了 `returncode_*.txt`、`stderr_*.log`、`stdout_*.log`、`cmd_*.txt` 等。
 本软件不删除、不改动旧结果：这些文件在旧流程运行完之后统一移到各步骤目录下的 `_run_logs/`（`batch_report.py` 运行时还会读取它们，
-所以旧流程运行中不移动），移动记录写进项目的 `CLEANUP.md`。本软件自己的日志只在 `logs/` 和 `benchmarks/` 中。
+所以旧流程运行中不移动），移动记录写进项目的 `CLEANUP.md`。本软件自己的日志只在 `pipeline_info/logs/` 和 `pipeline_info/benchmarks/` 中。

@@ -53,7 +53,7 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 - 否则自动建 bioconda 环境 MitoFinder **1.4.1**：它的环化检查实际没有运行（启动检查脚本时没有传参数），结果中的
   "Circularization" 不可信，汇总 README.txt 会注明；环化请以 `wgs_skim circularize` / topology 为准。
 
-## 输出（按来源分目录，`mitofinder/<来源>/`）
+## 输出（按来源分目录，`mitofinder_<来源>/`）
 
 | 文件 | 内容 |
 |---|---|
@@ -83,7 +83,7 @@ wgs_skim mitofinder -r clean_reads/ -o mf/ --ref related.gb
 | `possible contamination` | 最佳命中是**别的科**且一致度 ≥ 85 %：污染物与其来源高度相似 |
 | `possible contamination`（同种规则） | 某拷贝与数据库中某物种 X 几乎相同（≥ 97 %），并且：同一基因的另一个拷贝不是 X（< 90 %）——同一样品有两种不同的 COX1 就是两种生物；或 X 的最佳记录是完整线粒体，而样品其他基因都不与它相似。样品中这些拷贝之外没有任何基因支持 X 时才报（候选拷贝之间不互相作证）。不受多数投票影响：sim5 S5 中污染的 COX1、CYTB 两个基因曾以 2 票把样品判为 Nephtyidae。近缘属（< 97 %）不报 |
 
-输出 `mitofinder/<来源>/blast/`：`samples_check.tsv`（每个样品：多数科与物种、一致的基因数、被标记的基因、结论）、
+输出 `mitofinder_<来源>/blast/`：`samples_check.tsv`（每个样品：多数科与物种、一致的基因数、被标记的基因、结论）、
 `genes_check.tsv`（每个样品每个基因：最佳命中、物种、科、一致度、覆盖度、结论）、`blast_topn.tsv`（全部命中）。
 
 实测（MJ20260820041 CHY006–008 的 MitoFinder 结果，本地后生动物库，45 个基因 105 s）：nt 中没有近缘种（COX1 最佳 82 %

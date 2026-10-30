@@ -49,7 +49,7 @@ cat res/benchmarks/<任务>/<样品>.tsv         # 实际时间（s）、峰值�
 wgs_skim nuclear --status -o nuclear/       # 核基因批量：每个样品每个标记的状态
 ```
 
-每个样品的结果一完成就写到它的目录里（例如 `mito/<s>/<s>.mt.fasta`），不必等整批结束。
+每个样品的结果一完成就写到它的目录里（例如 `mitogenome/<s>/<s>.mt.fasta`），不必等整批结束。
 `summary/samples.tsv` 在最后汇总；中途想看，`wgs_skim run -r raw/ -o res/ --steps summary` 汇总已有的结果。
 
 ## 续跑与重跑

@@ -36,7 +36,7 @@ MitoM 把每个组蛋白拷贝分类，每个基因的代表序列优先取基�
 
 ```bash
 wgs_skim run -r raw/ -o res/ --steps nr        # GetOrganelle + MitoM -> rdna/<s>/<s>.rdna.gbf、histone/<s>/<s>.histone.gbf
-wgs_skim run -r raw/ -o res/ --steps nuclear   # + SPAdes-MitoM、拷贝数、比较 -> nuclear/<s>/
+wgs_skim run -r raw/ -o res/ --steps nuclear   # + SPAdes-MitoM、拷贝数、比较 -> nuclear_markers/<s>/
 ```
 
 ## 对已有结果运行：`wgs_skim nuclear`
@@ -57,7 +57,7 @@ nuclear/
 ├── summary.tsv                    每个样品 x 每个基因：两种方法的长度、是否不完整、组蛋白类别、错配、插入缺失、一致度、结论
 ├── rdna/ histone/
 │   ├── getorganelle/<s>/          组装结果、组装图、rounds.tsv
-│   └── annotation/<s>/            <s>.rdna.gbf / <s>.histone.gbf、nuc_features.tsv、consensus/、genes/、submission/（NCBI）
+│   └── mitom/<s>/            <s>.rdna.gbf / <s>.histone.gbf、nuc_features.tsv、consensus/、genes/、submission/（NCBI）
 ├── spades_mitom/<s>/              MitoM 在 SPAdes 组装上的结果（两种标记一次完成）
 ├── compare/<s>.tsv                每个样品的比较
 └── logs/ benchmarks/              每个任务的日志、时间、内存
