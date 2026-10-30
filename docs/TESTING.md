@@ -235,8 +235,11 @@ SPAdes 4.8 GB（申请 32 GB = `spades_min_mem_gb`），其余 < 7 GB。运行�
 python tests/sim/simulate.py --sheet sim5/samples.tsv -o sim5 --rna-nuclear A1.rna.fasta \
     --contaminant S5_Pisione:nephtys_mt.fasta:COX1,CYTB
 tests/all_features.sh sim5 sim5_features dna &  tests/all_features.sh sim5 sim5_features rna   # 两条线同时运行
-python tests/sim/check_truth.py sim5 sim5_features      # -> README.md（每个功能一行）、truth_check.md
+python tests/sim/check_truth.py sim5 sim5_features      # -> truth_check.md
+python tests/sim/report.py sim5 sim5_features 全功能测试结果   # 每个功能一个文件夹：说明.md + 结果/（关键文件）
 ```
+本机结果：`wgs_skim_test/`（`README.md` → `全功能测试结果/`；数据 `模拟数据/`，原始输出 `全功能测试_完整输出/`，
+开发过程中的旧测试 `旧测试记录/`）。
 每个功能一个目录（`NN_功能/`，内有 CHECK.md：命令、结果、看什么）。共 34 个功能：单工具（fastp、MEANGS、GetOrganelle
 mt / nr、SPAdes genome / meta、GenomeScope、BUSCO、MitoM、BLAST、MitoFinder 组装 / reads / bioconda / 多参考）、组合
 （meangs-getorganelle、spades-busco、spades-mitofinder、rnaspades-busco、trinity-busco、rnaspades-mitofinder、
