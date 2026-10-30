@@ -6,6 +6,7 @@ and get the command that runs it. Standard library only; listens on 127.0.0.1 (o
 """
 import json
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ import yaml
 from .paths import HOME, TAXA, presets, workflow_root
 
 PRESET_DIR = HOME / "presets"
+TOKEN = secrets.token_urlsafe(32)    # per session: other web pages in the browser cannot call this server
 
 
 def default_keys():
@@ -163,8 +165,10 @@ function build() {
   $("#yaml").value = lines.join("\n") + "\n";
 }
 document.addEventListener("input", e => { if (e.target.id !== "yaml" && e.target.id !== "reads") build(); });
+const TOKEN = "__TOKEN__";
 async function post(url, body) {
-  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-Token": TOKEN},
+                              body: JSON.stringify(body)});
   return r.json();
 }
 function say(text, ok) { $("#msg").textContent = text; $("#msg").className = "msg " + (ok ? "ok" : "bad"); }
@@ -180,7 +184,7 @@ $("#preview").onclick = async () => {
 };
 $("#load").onchange = async () => {
   const name = $("#load").value; if (!name) return;
-  const res = await (await fetch("/preset?name=" + encodeURIComponent(name))).json();
+  const res = await (await fetch("/preset?name=" + encodeURIComponent(name), {headers: {"X-Token": TOKEN}})).json();
   const o = res.options || {}, steps = String(o.steps || "").split(",").map(s => s.trim());
   $$("[data-step]").forEach(x => x.checked = steps.includes(x.dataset.step) || (steps[0] === "" && x.dataset.step !== "rnaspades" && x.dataset.step !== "trinity" && (x.dataset.step !== "mitofinder" || o.mitofinder)));
   $("#qc").checked = o.qc !== false;
@@ -204,12 +208,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):            # quiet
         pass
 
+    def _allowed(self, need_token=True):
+        """same machine, this server's own page: Host is 127.0.0.1 / localhost (DNS rebinding), the session token
+        is sent (other sites' requests), POST bodies are JSON"""
+        port = self.server.server_address[1]
+        if self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            return False
+        if need_token and not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
+            return False
+        if self.command == "POST" and self.headers.get("Content-Type", "").split(";")[0] != "application/json":
+            return False
+        return True
+
     def do_GET(self):
-        if self.path == "/":
+        if self.path.split("?")[0] == "/" and self._allowed(need_token=False):
+            if self.path != f"/?t={TOKEN}":
+                return self._send(403, "open the address printed by `wgs_skim gui` (it carries a session token)",
+                                  "text/plain")
             opts = "".join(f'<option value="{n}">{n}</option>' for n in presets())
             taxa = "".join(f'<option value="{t}">{t}</option>' for t in TAXA)
             page = PAGE.replace("__PRESETS__", opts).replace("__TAXA__", taxa).replace("__PRESET_DIR__", str(PRESET_DIR))
+            page = page.replace("__TOKEN__", TOKEN)
             return self._send(200, page, "text/html")
+        if not self._allowed():
+            return self._send(403, {"error": "forbidden"})
         if self.path.startswith("/preset?name="):
             from urllib.parse import unquote
             name = unquote(self.path.split("=", 1)[1])
@@ -222,11 +244,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._allowed():
+            return self._send(403, {"ok": False, "message": "forbidden"})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         if self.path == "/save":
             name = str(body.get("name", "")).strip()
             if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
                 return self._send(200, {"ok": False, "message": "preset name: letters, digits, _ . - only"})
+            if (workflow_root() / "config" / "presets" / f"{name}.yaml").exists():
+                return self._send(200, {"ok": False, "message": f"'{name}' is a built-in preset: choose another name"})
             _, problems = check_preset(body.get("yaml", ""))
             if problems:
                 return self._send(200, {"ok": False, "message": "; ".join(problems)})
@@ -248,9 +274,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(port=8765, open_browser=True):
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}/?t={TOKEN}"
     print(f"[wgs_skim] preset editor at {url}  (Ctrl-C to stop; on a server: ssh -L {port}:localhost:{port} <server>, "
-          f"then open http://localhost:{port})", flush=True)
+          f"then open the address with localhost)", flush=True)
     if open_browser:
         try:
             webbrowser.open(url)
